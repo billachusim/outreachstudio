@@ -312,20 +312,124 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
           {pitches.length > 0 && (
             <div className="space-y-2 border-t pt-4">
               <h3 className="text-sm font-semibold">Pitch history ({pitches.length})</h3>
+              <p className="text-xs text-muted-foreground">
+                Tap a pitch to expand. You can copy it, load it into the editor, edit it directly, or revise it with AI.
+              </p>
               <div className="space-y-2">
-                {pitches.map((p) => (
-                  <div key={p.id} className="rounded-md border bg-muted/30 p-3 text-sm">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="font-medium">{p.subject || "(no subject)"}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(p.created_at).toLocaleString()}
-                      </span>
+                {pitches.map((p) => {
+                  const isOpen = expandedId === p.id;
+                  const isEditing = editingId === p.id;
+                  const isRevising = revisingId === p.id;
+                  return (
+                    <div key={p.id} className="rounded-md border bg-muted/30 text-sm">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(isOpen ? null : p.id)}
+                        className="flex w-full items-center justify-between gap-2 p-3 text-left hover:bg-muted/50"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          {isOpen ? (
+                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          )}
+                          <span className="truncate font-medium">{p.subject || "(no subject)"}</span>
+                        </div>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {new Date(p.created_at).toLocaleString()}
+                        </span>
+                      </button>
+
+                      {isOpen && (
+                        <div className="space-y-3 border-t p-3">
+                          {!isEditing && (
+                            <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded bg-background p-3 font-sans text-xs leading-relaxed">
+                              {p.body || "(empty)"}
+                            </pre>
+                          )}
+
+                          {isEditing && (
+                            <div className="space-y-2">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Subject</Label>
+                                <Input
+                                  value={editSubject}
+                                  onChange={(e) => setEditSubject(e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Body</Label>
+                                <Textarea
+                                  rows={10}
+                                  value={editBody}
+                                  onChange={(e) => setEditBody(e.target.value)}
+                                />
+                              </div>
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => saveEdit(p)} disabled={savingEdit}>
+                                  {savingEdit ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                                  Save changes
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={cancelEdit}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {isRevising && (
+                            <div className="space-y-2 rounded-md border border-dashed p-2">
+                              <Label className="text-xs">What should the AI change?</Label>
+                              <Textarea
+                                rows={3}
+                                value={reviseInstructions}
+                                onChange={(e) => setReviseInstructions(e.target.value)}
+                                placeholder="e.g. Make it shorter, mention their fleet size, change CTA to a WhatsApp reply"
+                              />
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => runRevise(p)} disabled={revising}>
+                                  {revising ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                                  Revise with AI
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setRevisingId(null)} disabled={revising}>
+                                  Cancel
+                                </Button>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">
+                                Replaces this pitch with the AI-revised version.
+                              </p>
+                            </div>
+                          )}
+
+                          {!isEditing && !isRevising && (
+                            <div className="flex flex-wrap gap-2">
+                              <Button size="sm" variant="outline" onClick={() => copyPitch(p)}>
+                                <Copy className="h-3 w-3" /> Copy
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => loadIntoEditor(p)}>
+                                <ArrowUpToLine className="h-3 w-3" /> Load to editor
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => startEdit(p)}>
+                                <Pencil className="h-3 w-3" /> Edit
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => startRevise(p)}>
+                                <Wand2 className="h-3 w-3" /> Edit with AI
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="ml-auto text-destructive hover:text-destructive"
+                                onClick={() => deletePitch(p)}
+                              >
+                                <Trash2 className="h-3 w-3" /> Delete
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <p className="line-clamp-4 whitespace-pre-wrap text-xs text-muted-foreground">
-                      {p.body || "(empty)"}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
