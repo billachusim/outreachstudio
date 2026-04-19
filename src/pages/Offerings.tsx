@@ -17,8 +17,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2, Rocket } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { startOutreachFromOffering } from "@/lib/startOutreach";
+import { useNavigate } from "react-router-dom";
 
 type Offering = {
   id: string;
@@ -47,10 +49,26 @@ const empty: Partial<Offering> = {
 const Offerings = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [offerings, setOfferings] = useState<Offering[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Partial<Offering>>(empty);
+  const [starting, setStarting] = useState<string | null>(null);
+
+  const handleStart = async (o: Offering) => {
+    if (!user) return;
+    setStarting(o.id);
+    try {
+      await startOutreachFromOffering({ userId: user.id, offeringId: o.id, offeringTitle: o.title });
+      toast({ title: "Outreach started", description: "Engine is finding leads now. Check Studio for progress." });
+      navigate("/");
+    } catch (e: any) {
+      toast({ title: "Could not start", description: e?.message ?? "Try again", variant: "destructive" });
+    } finally {
+      setStarting(null);
+    }
+  };
 
   useEffect(() => {
     document.title = "Offerings · Outreach Studio";
@@ -192,7 +210,11 @@ const Offerings = () => {
                     <p className="line-clamp-3">{o.problem_solved}</p>
                   </div>
                 )}
-                <div className="flex gap-2 pt-2">
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Button size="sm" onClick={() => handleStart(o)} disabled={starting === o.id}>
+                    <Rocket className="h-3.5 w-3.5" />
+                    {starting === o.id ? "Starting…" : "Start Outreach"}
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => { setDraft(o); setOpen(true); }}>
                     <Pencil className="h-3.5 w-3.5" /> Edit
                   </Button>
