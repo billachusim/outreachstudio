@@ -34,6 +34,8 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PitchDrawer } from "@/components/PitchDrawer";
+import { BulkDraftBar } from "@/components/BulkDraftBar";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type LeadStatus = "new" | "enriched" | "drafted" | "sent" | "opened" | "replied" | "won" | "lost";
 type Lead = {
@@ -76,6 +78,20 @@ const Leads = () => {
   const [draft, setDraft] = useState<Partial<Lead>>({ business_name: "", status: "new" });
   const [pitchLead, setPitchLead] = useState<Lead | null>(null);
   const [pitchOpen, setPitchOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const toggleOne = (id: string) => {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected((s) => (s.size === leads.length ? new Set() : new Set(leads.map((l) => l.id))));
+  };
+  const clearSelection = () => setSelected(new Set());
 
   useEffect(() => { document.title = "Leads · Outreach Studio"; }, []);
 
@@ -211,6 +227,12 @@ const Leads = () => {
         </div>
       </div>
 
+      <BulkDraftBar
+        selectedIds={Array.from(selected)}
+        onClear={clearSelection}
+        onComplete={() => { clearSelection(); load(); }}
+      />
+
       {leads.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-muted-foreground">
@@ -222,6 +244,13 @@ const Leads = () => {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={selected.size > 0 && selected.size === leads.length}
+                    onCheckedChange={toggleAll}
+                    aria-label="Select all"
+                  />
+                </TableHead>
                 <TableHead>Business</TableHead>
                 <TableHead>Contact</TableHead>
                 <TableHead>Website</TableHead>
@@ -231,7 +260,14 @@ const Leads = () => {
             </TableHeader>
             <TableBody>
               {leads.map((l) => (
-                <TableRow key={l.id}>
+                <TableRow key={l.id} data-state={selected.has(l.id) ? "selected" : undefined}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selected.has(l.id)}
+                      onCheckedChange={() => toggleOne(l.id)}
+                      aria-label={`Select ${l.business_name}`}
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className="font-medium">{l.business_name}</div>
                     {l.address && <div className="text-xs text-muted-foreground">{l.address}</div>}
