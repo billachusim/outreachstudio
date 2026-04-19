@@ -21,7 +21,9 @@ const corsHeaders = {
 
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const RESEND_GATEWAY = "https://connector-gateway.lovable.dev/resend";
-const FROM = "Pitchdesk <onboarding@resend.dev>";
+// Verified domain: techfaculty.ng (Resend)
+const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
+const REPLY_TO = "outreach@techfaculty.ng"; // TODO: swap to Gmail when provided
 
 const json = (status: number, payload: unknown) =>
   new Response(JSON.stringify(payload), {
@@ -524,6 +526,7 @@ Notes: ${lead.notes ?? ""}`;
         body: JSON.stringify({
           from: FROM,
           to: [lead.contact_email],
+          reply_to: REPLY_TO,
           subject: pitch.subject,
           html: bodyToHtml(pitch.body ?? ""),
           text: pitch.body,
