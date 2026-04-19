@@ -22,8 +22,10 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Megaphone } from "lucide-react";
+import { Plus, Megaphone, Rocket } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { startOutreach } from "@/lib/startOutreach";
+import { useNavigate } from "react-router-dom";
 
 type Campaign = {
   id: string;
@@ -41,6 +43,7 @@ type Offering = { id: string; title: string };
 const Campaigns = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [offerings, setOfferings] = useState<Offering[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -157,21 +160,36 @@ const Campaigns = () => {
           {campaigns.map((c) => {
             const offering = offerings.find((o) => o.id === c.offering_id);
             return (
-              <Link key={c.id} to={`/leads?campaign=${c.id}`}>
-                <Card className="h-full transition-colors hover:border-primary/50">
-                  <CardHeader>
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-lg">{c.name}</CardTitle>
-                      <Badge variant="secondary">{counts[c.id] ?? 0} leads</Badge>
-                    </div>
-                    {offering && <p className="text-sm text-muted-foreground">Pitching: {offering.title}</p>}
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm text-muted-foreground">
-                    {c.city && <p>📍 {c.city}</p>}
-                    {c.category && <p>🏷️ {c.category}</p>}
-                  </CardContent>
-                </Card>
-              </Link>
+              <Card key={c.id} className="h-full transition-colors hover:border-primary/50">
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-2">
+                    <Link to={`/leads?campaign=${c.id}`}>
+                      <CardTitle className="text-lg hover:underline">{c.name}</CardTitle>
+                    </Link>
+                    <Badge variant="secondary">{counts[c.id] ?? 0} leads</Badge>
+                  </div>
+                  {offering && <p className="text-sm text-muted-foreground">Pitching: {offering.title}</p>}
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-muted-foreground">
+                  {c.city && <p>📍 {c.city}</p>}
+                  {c.category && <p>🏷️ {c.category}</p>}
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      if (!user) return;
+                      try {
+                        await startOutreach({ userId: user.id, campaignId: c.id });
+                        toast({ title: "Outreach started", description: "Engine is running. Watch Studio for progress." });
+                        navigate("/");
+                      } catch (e: any) {
+                        toast({ title: "Could not start", description: e?.message, variant: "destructive" });
+                      }
+                    }}
+                  >
+                    <Rocket className="h-3.5 w-3.5" /> Start Outreach
+                  </Button>
+                </CardContent>
+              </Card>
             );
           })}
         </div>

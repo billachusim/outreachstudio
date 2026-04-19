@@ -13,6 +13,7 @@ import Campaigns from "./pages/Campaigns";
 import Leads from "./pages/Leads";
 import Templates from "./pages/Templates";
 import Inbox from "./pages/Inbox";
+import Chat from "./pages/Chat";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -39,6 +40,7 @@ const App = () => (
               <Route path="/leads" element={<Leads />} />
               <Route path="/templates" element={<Templates />} />
               <Route path="/inbox" element={<Inbox />} />
+              <Route path="/chat" element={<Chat />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

@@ -11,12 +11,13 @@ import { useToast } from "@/hooks/use-toast";
 import { Sparkles } from "lucide-react";
 
 const Auth = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, enableAutoLogin } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   useEffect(() => {
     document.title = "Sign in · Outreach Studio";
@@ -44,6 +45,7 @@ const Auth = () => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setSubmitting(false);
     if (error) return toast({ title: "Sign in failed", description: error.message, variant: "destructive" });
+    if (rememberMe) enableAutoLogin(email, password);
     navigate("/");
   };
 
@@ -74,6 +76,15 @@ const Auth = () => {
                   <Label htmlFor="signin-password">Password</Label>
                   <Input id="signin-password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
                 </div>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  Stay signed in (skip login next time)
+                </label>
                 <Button type="submit" className="w-full" disabled={submitting}>
                   {submitting ? "Signing in…" : "Sign in"}
                 </Button>
