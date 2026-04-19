@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Offering = {
@@ -94,11 +94,24 @@ const Offerings = () => {
 
   return (
     <div className="container mx-auto max-w-6xl space-y-6 p-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Offerings</h1>
           <p className="text-sm text-muted-foreground">Your products, services and skills you pitch to leads.</p>
         </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              if (!user) return;
+              if (!confirm("Refresh the built-in offerings (2nd Baze Garden, Tech Faculty, RetailOS, Free Landing Pages) to their latest defaults? This overwrites your edits to those rows.")) return;
+              await seedOfferingsIfEmpty(user.id, true);
+              toast({ title: "Defaults refreshed" });
+              load();
+            }}
+          >
+            <RefreshCw className="h-4 w-4" /> Refresh defaults
+          </Button>
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setDraft(empty); }}>
           <DialogTrigger asChild>
             <Button onClick={() => setDraft(empty)}>
@@ -144,6 +157,7 @@ const Offerings = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {loading ? (
