@@ -257,6 +257,54 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
     }
   };
 
+  const handleEnrich = async () => {
+    if (!lead) return;
+    setEnriching(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("enrich-lead", {
+        body: { leadId: lead.id },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const found = (data as any).email;
+      toast({
+        title: "Enriched",
+        description: found
+          ? `Found ${found}. Lead updated.`
+          : "Scraped — no email found, but summary saved to notes.",
+      });
+      onSaved?.();
+    } catch (e: any) {
+      toast({ title: "Enrich failed", description: e?.message ?? "Could not enrich.", variant: "destructive" });
+    } finally {
+      setEnriching(false);
+    }
+  };
+
+  const handleSendPitch = async (p: Pitch) => {
+    if (!lead) return;
+    if (!lead.contact_email) {
+      toast({ title: "No contact email", description: "Enrich the lead or add an email first.", variant: "destructive" });
+      return;
+    }
+    if (!confirm(`Send to ${lead.contact_email}?\n\nSubject: ${p.subject ?? "(none)"}`)) return;
+    setSendingId(p.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("send-pitch", {
+        body: { pitchId: p.id },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast({ title: "Pitch sent", description: `Delivered to ${lead.contact_email}.` });
+      await refreshPitches();
+      onSaved?.();
+    } catch (e: any) {
+      toast({ title: "Send failed", description: e?.message ?? "Could not send.", variant: "destructive" });
+    } finally {
+      setSendingId(null);
+    }
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
