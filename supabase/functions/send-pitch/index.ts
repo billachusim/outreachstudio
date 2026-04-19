@@ -12,8 +12,9 @@ const corsHeaders = {
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
 const DEFAULT_DAILY_CAP = 50;
-// Test sender — switch to a verified domain when ready.
-const FROM = "Pitchdesk <onboarding@resend.dev>";
+// Verified domain: techfaculty.ng (Resend)
+const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
+const REPLY_TO = "outreach@techfaculty.ng"; // TODO: swap to Gmail when provided
 
 interface Body {
   pitchId: string;
@@ -112,6 +113,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: FROM,
         to: [lead.contact_email],
+        reply_to: REPLY_TO,
         subject: pitch.subject,
         html: bodyToHtml(pitch.body),
         text: pitch.body,
