@@ -1,53 +1,56 @@
 
+User wants to start Phase 2 + 3 from the original roadmap:
+- Phase 2: Google Places lead search, Firecrawl enrichment
+- Phase 3: AI pitch drafting
 
-User wants to:
-1. Add a new offering: free landing pages for businesses (likely a lead-magnet / foot-in-the-door offer).
-2. Enrich the Tech Faculty offering using real content from techfaculty.ng pages for businesses & schools.
+They said "decide" — so I pick the order. Best build order:
+1. AI pitch drafting first (uses existing offerings + manual leads, no external keys, instant value via Lovable AI)
+2. Firecrawl enrichment (connector, no manual key — auto-fills lead email/summary from website)
+3. Google Places lead search (needs user's Google API key — defer the key request until last)
 
-I should fetch both URLs to ground the Tech Faculty details, then propose seed updates. Since this is plan mode (read-only), I'll fetch and present.
+This sequencing means user gets value immediately, and we only block on a user-provided key at the very end.
 
-Let me fetch both pages.
+Check what exists: pitches table already exists (lead_id, subject, body, sent_at). Good. Firecrawl is a connector. Google Places needs a Maps API key from user.
 
-[fetching https://techfaculty.ng/business-partnerships and https://techfaculty.ng/school-collaborations]
+Keep plan tight.
 
-Plan: extend `seedOfferings.ts` and update existing seeded "Tech Faculty" row, plus add a new "Free Landing Pages" offering. Since seeding only runs when offerings table is empty, and the user already has rows, I need a smarter sync — upsert by title for the seed set so additions/edits propagate on next load (only for this user, only for the seed titles, and only if not modified). Simpler: just add an "Apply seed updates" button OR make seed idempotent by title.
+# Phase 2 + 3 — Build order
 
-Concise plan:
+I'll build in this order so each step delivers value before needing the next dependency:
 
-# Add new offerings + enrich Tech Faculty
+## Step 1 — AI pitch drafting (no setup needed)
+Uses Lovable AI (built-in, no key required).
 
-## What I'll fetch
-Pull live content from:
-- techfaculty.ng/business-partnerships
-- techfaculty.ng/school-collaborations
+- New **"Draft pitch"** button on each lead row + lead detail drawer
+- Edge function `draft-pitch`: takes lead + its campaign's offering, returns subject + body using `google/gemini-2.5-flash`
+- Editable preview modal → save to `pitches` table → lead status auto-moves to `drafted`
+- New **Pitches** view per lead showing draft history
+- Templates page wired up: pick a template as a tone/style hint for the AI
 
-…and use it to fill out the Tech Faculty offering with real audience, problems, programs, and ideal-customer copy for both segments.
+## Step 2 — Firecrawl enrichment (one-click connect)
+Uses the Firecrawl connector — you click "Connect" once, no key to paste.
 
-## New offering
-**Free Landing Pages for Businesses** — a lead-magnet offering.
-- Tagline: "A free, conversion-ready landing page for your business — live in 48 hours."
-- Audience: SMEs, solopreneurs, event organizers, new product launches
-- Problem solved: No web presence, slow developers, expensive agencies
-- Pricing: Free (1 page, 1 revision); upsell to hosting, domain, multi-page site
-- Ideal customer: Businesses with a clear offer but no landing page
+- New **"Enrich"** button on lead rows (and bulk-enrich on the leads table)
+- Edge function `enrich-lead`: scrapes `lead.website` for contact email, business summary, services
+- Auto-populates `contact_email`, appends summary to `notes`, status → `enriched`
+- Pitch drafting in Step 1 will then use the scraped summary for sharper, personalized copy
 
-## Enriched Tech Faculty (split-aware)
-One offering, but copy will explicitly call out two tracks pulled from the live site:
-- **Business Partnerships track** — corporate upskilling, team trainings, custom curricula
-- **School Collaborations track** — tech clubs, teacher training, student bootcamps, curriculum support
+## Step 3 — Google Places lead search (needs your API key)
+Find businesses by city + category and import as leads.
 
-Exact programs, value props, and ideal-customer language will come straight from the two URLs above.
+- New **"Find leads"** action on a campaign → form: city, category, keywords, radius
+- Edge function `search-places`: calls Google Places Text Search, returns business name, website, phone, address
+- Preview list with checkboxes → "Import selected" creates leads tied to the campaign
+- **Requires:** a Google Maps API key with Places API enabled (I'll request it when we get to this step — instructions included)
 
-## How the update reaches your DB
-Since seed only fires on empty tables and yours already has rows, I'll switch `seedOfferings.ts` to a **title-based upsert** for the known seed titles (2nd Baze Garden, Tech Faculty, RetailOS, Free Landing Pages). On next load:
-- Missing seed titles → inserted
-- Existing seed titles → left alone (so your manual edits aren't overwritten)
+## What I won't touch yet
+- Resend sending, Inbox, daily send cap → next phase after these three are working
 
-Plus a small "Reset seed offerings to defaults" button on the Offerings page in case you want to pull in the refreshed Tech Faculty copy.
+## Files I'll add/edit
+- `supabase/functions/draft-pitch/index.ts`, `enrich-lead/index.ts`, `search-places/index.ts`
+- `src/pages/Leads.tsx` — Draft / Enrich actions, pitch drawer
+- `src/pages/Campaigns.tsx` — Find leads action
+- `src/pages/Templates.tsx` — full CRUD (currently a stub)
+- Small `src/lib/ai.ts` helper for invoking edge functions
 
-## Files touched
-- `src/lib/seedOfferings.ts` — add Free Landing Pages, enrich Tech Faculty, switch to per-title insert-if-missing
-- `src/pages/Offerings.tsx` — add "Refresh defaults" action
-
-No DB schema changes. No new integrations.
-
+Approve and I'll start with Step 1 (AI drafting) so you can test it immediately.
