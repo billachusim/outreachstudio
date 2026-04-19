@@ -290,7 +290,19 @@ Deno.serve(async (req) => {
       .from("chat_messages").select("role, content, tool_calls, tool_name, tool_call_id")
       .eq("conversation_id", conversationId).order("created_at");
 
-    const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
+    // Load persistent memory files and prepend them to the system prompt
+    const { data: memRows } = await supabase
+      .from("agent_memories").select("slug, title, kind, content")
+      .eq("user_id", user.id).order("kind");
+    let systemPrompt = BASE_SYSTEM_PROMPT;
+    if (memRows?.length) {
+      const memBlock = memRows
+        .map((m: any) => `### ${m.title}\n_(slug: ${m.slug}, kind: ${m.kind})_\n\n${m.content}`)
+        .join("\n\n---\n\n");
+      systemPrompt += `\n\n## Persistent memory\n\nThese are your durable notes about the operator, products, and operating procedures. Treat them as ground truth. Use write_memory to update them.\n\n${memBlock}`;
+    }
+
+    const messages: any[] = [{ role: "system", content: systemPrompt }];
     for (const m of history ?? []) {
       if (m.role === "tool") {
         messages.push({ role: "tool", content: m.content, tool_call_id: m.tool_call_id, name: m.tool_name });
