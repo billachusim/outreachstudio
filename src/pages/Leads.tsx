@@ -31,8 +31,9 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PitchDrawer } from "@/components/PitchDrawer";
 
 type LeadStatus = "new" | "enriched" | "drafted" | "sent" | "opened" | "replied" | "won" | "lost";
 type Lead = {
@@ -73,6 +74,8 @@ const Leads = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Partial<Lead>>({ business_name: "", status: "new" });
+  const [pitchLead, setPitchLead] = useState<Lead | null>(null);
+  const [pitchOpen, setPitchOpen] = useState(false);
 
   useEffect(() => { document.title = "Leads · Outreach Studio"; }, []);
 
@@ -258,9 +261,19 @@ const Leads = () => {
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(l.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Draft pitch"
+                        onClick={() => { setPitchLead(l); setPitchOpen(true); }}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(l.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -268,6 +281,13 @@ const Leads = () => {
           </Table>
         </Card>
       )}
+
+      <PitchDrawer
+        lead={pitchLead}
+        open={pitchOpen}
+        onOpenChange={setPitchOpen}
+        onSaved={load}
+      />
     </div>
   );
 };
