@@ -1,56 +1,67 @@
 
-User wants to start Phase 2 + 3 from the original roadmap:
-- Phase 2: Google Places lead search, Firecrawl enrichment
-- Phase 3: AI pitch drafting
+User asks about sending pitches. Currently NOTHING sends — pitches just save to DB. The `pitches` table has `sent_at` but nothing populates it. No email integration exists.
 
-They said "decide" — so I pick the order. Best build order:
-1. AI pitch drafting first (uses existing offerings + manual leads, no external keys, instant value via Lovable AI)
-2. Firecrawl enrichment (connector, no manual key — auto-fills lead email/summary from website)
-3. Google Places lead search (needs user's Google API key — defer the key request until last)
+Need to plan: email sending (single + bulk) using Resend connector (recommended path per docs, since Lovable Emails requires workspace admin and user already has bulk-draft pattern). But — Resend needs verified domain to send to real prospects (not just test addresses). Check: leads have `contact_email` field but most leads probably don't have it filled (Firecrawl enrichment hasn't been built yet).
 
-This sequencing means user gets value immediately, and we only block on a user-provided key at the very end.
+Two real blockers to flag:
+1. Most leads have no `contact_email` (Firecrawl step skipped)
+2. Sending to cold prospects requires a verified sending domain in Resend (can't use onboarding@resend.dev for real outreach — will go to spam / be blocked)
 
-Check what exists: pitches table already exists (lead_id, subject, body, sent_at). Good. Firecrawl is a connector. Google Places needs a Maps API key from user.
+Plan should be honest: explain current state, propose build, flag blockers.
 
-Keep plan tight.
+# Sending pitches — current state + plan
 
-# Phase 2 + 3 — Build order
+## Right now
+Pitches are **drafted and saved only** — nothing is sent. The `sent_at` field exists in the database but no send flow is wired up. Bulk drafting works; bulk sending does not exist yet.
 
-I'll build in this order so each step delivers value before needing the next dependency:
+## What I'll build
 
-## Step 1 — AI pitch drafting (no setup needed)
-Uses Lovable AI (built-in, no key required).
+### 1. Email sending via Resend
+- Connect the **Resend** connector (one-click, no key to paste)
+- New edge function `send-pitch`: takes a pitch ID, sends via Resend, stamps `sent_at`, moves lead status to `contacted`
+- Skips leads with no `contact_email` (and tells you which ones)
 
-- New **"Draft pitch"** button on each lead row + lead detail drawer
-- Edge function `draft-pitch`: takes lead + its campaign's offering, returns subject + body using `google/gemini-2.5-flash`
-- Editable preview modal → save to `pitches` table → lead status auto-moves to `drafted`
-- New **Pitches** view per lead showing draft history
-- Templates page wired up: pick a template as a tone/style hint for the AI
+### 2. Single send
+- **"Send"** button next to each saved pitch in the lead drawer
+- Confirmation modal showing recipient, subject, body before sending
+- Disabled if lead has no `contact_email`
 
-## Step 2 — Firecrawl enrichment (one-click connect)
-Uses the Firecrawl connector — you click "Connect" once, no key to paste.
+### 3. Bulk send
+- New **"Send pitches"** mode on the existing bulk toolbar in Leads
+- Select leads → picks each lead's **most recent unsent pitch** → sends sequentially with progress bar (same pattern as bulk draft)
+- Daily safety cap (default 50/day, editable) to protect domain reputation
+- Skips: leads without email, leads already contacted, leads with no draft
 
-- New **"Enrich"** button on lead rows (and bulk-enrich on the leads table)
-- Edge function `enrich-lead`: scrapes `lead.website` for contact email, business summary, services
-- Auto-populates `contact_email`, appends summary to `notes`, status → `enriched`
-- Pitch drafting in Step 1 will then use the scraped summary for sharper, personalized copy
+### 4. Inbox view (light)
+- Update the existing Inbox page to list sent pitches with timestamps, recipient, status (sent / failed)
 
-## Step 3 — Google Places lead search (needs your API key)
-Find businesses by city + category and import as leads.
+## Two things you need to decide / provide
 
-- New **"Find leads"** action on a campaign → form: city, category, keywords, radius
-- Edge function `search-places`: calls Google Places Text Search, returns business name, website, phone, address
-- Preview list with checkboxes → "Import selected" creates leads tied to the campaign
-- **Requires:** a Google Maps API key with Places API enabled (I'll request it when we get to this step — instructions included)
+**A. Sending domain (important for cold outreach)**
+Resend lets you send from `onboarding@resend.dev` for testing, but real prospects will mark that as spam — and Resend blocks bulk sends from it anyway. For real outreach you need to:
+- Add a domain you own (e.g. `pitchdesk.yourdomain.com`) in Resend
+- Add 3 DNS records (SPF, DKIM, DMARC) — Resend gives you the exact values
 
-## What I won't touch yet
-- Resend sending, Inbox, daily send cap → next phase after these three are working
+I can build the send flow now using the test sender so you can verify the wiring, then you add your domain when ready. **Or** wait until your domain is verified before building.
+
+**B. Most leads have no email**
+Looking at your data, leads from manual entry don't have `contact_email`. Sending needs an address. You have two paths:
+- **Now:** manually add emails to a few test leads to validate the send flow
+- **Better:** build **Step 2 — Firecrawl enrichment first** to auto-extract emails from lead websites, then wire up sending
+
+## My recommendation
+Build in this order:
+1. **Firecrawl enrichment** (auto-fills `contact_email` from websites) — no setup beyond connecting Firecrawl
+2. **Resend send flow** (single + bulk + inbox) — connect Resend, use test sender first
+3. You add your sending domain in Resend when ready, I flip the `from` address
+
+This way bulk sending actually has emails to send to when it ships.
 
 ## Files I'll add/edit
-- `supabase/functions/draft-pitch/index.ts`, `enrich-lead/index.ts`, `search-places/index.ts`
-- `src/pages/Leads.tsx` — Draft / Enrich actions, pitch drawer
-- `src/pages/Campaigns.tsx` — Find leads action
-- `src/pages/Templates.tsx` — full CRUD (currently a stub)
-- Small `src/lib/ai.ts` helper for invoking edge functions
+- `supabase/functions/send-pitch/index.ts` (new)
+- `supabase/functions/enrich-lead/index.ts` (new, if you approve Firecrawl first)
+- `src/components/PitchDrawer.tsx` — add Send button per pitch
+- `src/components/BulkDraftBar.tsx` — add "Send" mode
+- `src/pages/Inbox.tsx` — sent-pitches list
 
-Approve and I'll start with Step 1 (AI drafting) so you can test it immediately.
+Tell me: **Firecrawl first then Resend**, or **Resend now with manually-added test emails**?
