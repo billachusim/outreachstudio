@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Sparkles } from "lucide-react";
+import { Plus, Trash2, Sparkles, MessageCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PitchDrawer } from "@/components/PitchDrawer";
 import { BulkDraftBar } from "@/components/BulkDraftBar";
@@ -138,6 +138,18 @@ const Leads = () => {
     if (!confirm("Delete this lead?")) return;
     const { error } = await supabase.from("leads").delete().eq("id", id);
     if (error) return toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+    load();
+  };
+
+  const sendWhatsApp = async (lead: Lead) => {
+    if (!lead.phone) return toast({ title: "No phone", description: "Add a phone number to this lead first.", variant: "destructive" });
+    const body = window.prompt(`WhatsApp message to ${lead.business_name} (${lead.phone}):`, "");
+    if (!body?.trim()) return;
+    const { data, error } = await supabase.functions.invoke("send-whatsapp", { body: { leadId: lead.id, body } });
+    if (error || (data && data.error)) {
+      return toast({ title: "WhatsApp failed", description: error?.message || data?.error, variant: "destructive" });
+    }
+    toast({ title: "WhatsApp sent", description: `Delivered to ${lead.phone}` });
     load();
   };
 
@@ -306,6 +318,11 @@ const Leads = () => {
                       >
                         <Sparkles className="h-4 w-4" />
                       </Button>
+                      {l.phone && (
+                        <Button variant="ghost" size="icon" title="Send WhatsApp" onClick={() => sendWhatsApp(l)}>
+                          <MessageCircle className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" onClick={() => handleDelete(l.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>

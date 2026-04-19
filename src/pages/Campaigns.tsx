@@ -36,6 +36,8 @@ type Campaign = {
   status: string;
   offering_id: string | null;
   discovery_source: "firecrawl" | "google_places";
+  channel: "email" | "whatsapp" | "x" | "facebook" | "instagram";
+  auto_send: boolean;
   created_at: string;
 };
 
@@ -49,7 +51,7 @@ const Campaigns = () => {
   const [offerings, setOfferings] = useState<Offering[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Partial<Campaign>>({ name: "", status: "active", discovery_source: "firecrawl" });
+  const [draft, setDraft] = useState<Partial<Campaign>>({ name: "", status: "active", discovery_source: "firecrawl", channel: "email", auto_send: false });
 
   useEffect(() => { document.title = "Campaigns · Outreach Studio"; }, []);
 
@@ -88,11 +90,13 @@ const Campaigns = () => {
       keywords: draft.keywords ?? null,
       offering_id: draft.offering_id ?? null,
       discovery_source: draft.discovery_source ?? "firecrawl",
+      channel: draft.channel ?? "email",
+      auto_send: draft.auto_send ?? false,
       status: "active",
     } as never);
     if (error) return toast({ title: "Create failed", description: error.message, variant: "destructive" });
     setOpen(false);
-    setDraft({ name: "", status: "active", discovery_source: "firecrawl" });
+    setDraft({ name: "", status: "active", discovery_source: "firecrawl", channel: "email", auto_send: false });
     load();
   };
 
@@ -146,6 +150,25 @@ const Campaigns = () => {
               <div className="space-y-1.5">
                 <Label>Keywords</Label>
                 <Input value={draft.keywords ?? ""} onChange={(e) => setDraft({ ...draft, keywords: e.target.value })} placeholder="rooftop, premium, family-owned" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Outreach channel</Label>
+                <Select
+                  value={draft.channel ?? "email"}
+                  onValueChange={(v: Campaign["channel"]) => setDraft({ ...draft, channel: v })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                    <SelectItem value="x">X (Twitter)</SelectItem>
+                    <SelectItem value="facebook">Facebook</SelectItem>
+                    <SelectItem value="instagram">Instagram</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Connect the channel in Channels first. Auto-mode sends drafts automatically through the engine.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label>Lead discovery source</Label>

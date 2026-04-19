@@ -103,7 +103,9 @@ export type Database = {
       }
       campaigns: {
         Row: {
+          auto_send: boolean
           category: string | null
+          channel: string
           city: string | null
           created_at: string
           discovery_source: string
@@ -116,7 +118,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          auto_send?: boolean
           category?: string | null
+          channel?: string
           city?: string | null
           created_at?: string
           discovery_source?: string
@@ -129,7 +133,9 @@ export type Database = {
           user_id: string
         }
         Update: {
+          auto_send?: boolean
           category?: string | null
+          channel?: string
           city?: string | null
           created_at?: string
           discovery_source?: string
@@ -147,6 +153,110 @@ export type Database = {
             columns: ["offering_id"]
             isOneToOne: false
             referencedRelation: "offerings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channel_accounts: {
+        Row: {
+          channel: string
+          created_at: string
+          credentials: Json
+          display_name: string
+          external_id: string | null
+          id: string
+          metadata: Json
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          credentials?: Json
+          display_name: string
+          external_id?: string | null
+          id?: string
+          metadata?: Json
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          credentials?: Json
+          display_name?: string
+          external_id?: string | null
+          id?: string
+          metadata?: Json
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      channel_messages: {
+        Row: {
+          body: string | null
+          campaign_id: string | null
+          channel: string
+          channel_account_id: string | null
+          created_at: string
+          direction: string
+          error: string | null
+          from_address: string | null
+          id: string
+          lead_id: string | null
+          payload: Json | null
+          provider_message_id: string | null
+          status: string
+          subject: string | null
+          to_address: string | null
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          campaign_id?: string | null
+          channel: string
+          channel_account_id?: string | null
+          created_at?: string
+          direction: string
+          error?: string | null
+          from_address?: string | null
+          id?: string
+          lead_id?: string | null
+          payload?: Json | null
+          provider_message_id?: string | null
+          status?: string
+          subject?: string | null
+          to_address?: string | null
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          campaign_id?: string | null
+          channel?: string
+          channel_account_id?: string | null
+          created_at?: string
+          direction?: string
+          error?: string | null
+          from_address?: string | null
+          id?: string
+          lead_id?: string | null
+          payload?: Json | null
+          provider_message_id?: string | null
+          status?: string
+          subject?: string | null
+          to_address?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_messages_channel_account_id_fkey"
+            columns: ["channel_account_id"]
+            isOneToOne: false
+            referencedRelation: "channel_accounts"
             referencedColumns: ["id"]
           },
         ]
