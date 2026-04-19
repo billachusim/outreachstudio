@@ -20,11 +20,12 @@ const json = (status: number, payload: unknown) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-const SYSTEM_PROMPT = `You are the Studio Agent for an automated cold-outreach tool called Outreach Studio.
-You help the user manage their offerings, campaigns, leads, drafts, and sends.
-You have tools to start campaigns, check status, list leads/events, pause/resume runs, and send a single pitch.
+const BASE_SYSTEM_PROMPT = `You are the Studio Agent for Outreach Studio — Bill Achusim's command center for his portfolio of African tech, social, and PR products.
+You help the user manage offerings, campaigns, leads, drafts, and sends.
+You have tools to start campaigns, check status, list leads/events, pause/resume runs, send a single pitch, and read/write your own persistent memory files.
 Be concise and direct. Use markdown. When the user asks about progress, call get_run_status or list_recent_events first.
-Never invent leads, counts, or campaign names — always call a tool. If a tool returns nothing useful, say so plainly.`;
+Never invent leads, counts, or campaign names — always call a tool. If a tool returns nothing useful, say so plainly.
+When the user shares a preference, a new fact about a product, or asks you to remember something, call write_memory to persist it. When unsure who Bill is or what a product does, call read_memory or list_memories before guessing.`;
 
 const TOOLS = [
   {
@@ -107,6 +108,45 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "list_memories",
+      description: "List all persistent memory files (slug, title, kind). Use this to discover what context you already have.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_memory",
+      description: "Read the full markdown content of one memory file by slug.",
+      parameters: {
+        type: "object",
+        properties: { slug: { type: "string" } },
+        required: ["slug"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_memory",
+      description: "Create or update a persistent memory file. Use kind=note for new learnings; identity/personality/portfolio/playbook only when explicitly updating those.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Unique slug (lowercase, hyphens). Reusing an existing slug overwrites it." },
+          title: { type: "string" },
+          kind: { type: "string", enum: ["identity", "personality", "portfolio", "playbook", "note"] },
+          content: { type: "string", description: "Full markdown content." },
+        },
+        required: ["slug", "title", "kind", "content"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 async function executeTool(name: string, args: any, ctx: { supabase: any; userId: string; tickUrl: string; serviceKey: string }) {
@@ -175,6 +215,31 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
         .from("run_events").select("kind, message, level, created_at")
         .eq("user_id", userId).order("created_at", { ascending: false }).limit(args?.limit ?? 15);
       return data ?? [];
+    }
+    case "list_memories": {
+      const { data } = await supabase
+        .from("agent_memories").select("slug, title, kind, updated_at")
+        .eq("user_id", userId).order("kind").order("updated_at", { ascending: false });
+      return data ?? [];
+    }
+    case "read_memory": {
+      const { data } = await supabase
+        .from("agent_memories").select("slug, title, kind, content, updated_at")
+        .eq("user_id", userId).eq("slug", args.slug).maybeSingle();
+      return data ?? { error: `No memory with slug '${args.slug}'` };
+    }
+    case "write_memory": {
+      const { slug, title, kind, content } = args;
+      const { data: existing } = await supabase
+        .from("agent_memories").select("id").eq("user_id", userId).eq("slug", slug).maybeSingle();
+      if (existing) {
+        const { error } = await supabase.from("agent_memories")
+          .update({ title, kind, content }).eq("id", existing.id);
+        return error ? { error: error.message } : { ok: true, updated: slug };
+      }
+      const { error } = await supabase.from("agent_memories")
+        .insert({ user_id: userId, slug, title, kind, content });
+      return error ? { error: error.message } : { ok: true, created: slug };
     }
     default:
       return { error: `Unknown tool ${name}` };
