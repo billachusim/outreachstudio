@@ -9,10 +9,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { Sparkles, Loader2, X } from "lucide-react";
+import { Sparkles, Loader2, X, Globe, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Template = { id: string; name: string };
+type Mode = "draft" | "enrich" | "send";
 
 const TONES = ["warm & concise", "punchy & direct", "consultative", "playful", "formal"];
 
@@ -26,16 +27,20 @@ type JobState = {
   total: number;
   done: number;
   failed: number;
+  skipped: number;
   running: boolean;
   current: string | null;
 };
 
+const initialJob: JobState = { total: 0, done: 0, failed: 0, skipped: 0, running: false, current: null };
+
 export const BulkDraftBar = ({ selectedIds, onClear, onComplete }: Props) => {
   const { toast } = useToast();
+  const [mode, setMode] = useState<Mode>("draft");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [tone, setTone] = useState("warm & concise");
-  const [job, setJob] = useState<JobState>({ total: 0, done: 0, failed: 0, running: false, current: null });
+  const [job, setJob] = useState<JobState>(initialJob);
   const cancelRef = useRef(false);
 
   useEffect(() => {
@@ -46,34 +51,69 @@ export const BulkDraftBar = ({ selectedIds, onClear, onComplete }: Props) => {
       .then(({ data }) => setTemplates((data as Template[]) ?? []));
   }, []);
 
-  const startJob = async () => {
+  const runJob = async () => {
     if (selectedIds.length === 0) return;
     cancelRef.current = false;
-    setJob({ total: selectedIds.length, done: 0, failed: 0, running: true, current: null });
+    setJob({ ...initialJob, total: selectedIds.length, running: true });
 
     let done = 0;
     let failed = 0;
+    let skipped = 0;
+
     for (const leadId of selectedIds) {
       if (cancelRef.current) break;
       setJob((j) => ({ ...j, current: leadId }));
       try {
-        const { data, error } = await supabase.functions.invoke("draft-pitch", {
-          body: { leadId, templateId, tone, save: true },
-        });
-        if (error) throw error;
-        if ((data as any)?.error) throw new Error((data as any).error);
-        done += 1;
+        if (mode === "draft") {
+          const { data, error } = await supabase.functions.invoke("draft-pitch", {
+            body: { leadId, templateId, tone, save: true },
+          });
+          if (error) throw error;
+          if ((data as any)?.error) throw new Error((data as any).error);
+          done += 1;
+        } else if (mode === "enrich") {
+          const { data, error } = await supabase.functions.invoke("enrich-lead", {
+            body: { leadId },
+          });
+          if (error) throw error;
+          if ((data as any)?.error) throw new Error((data as any).error);
+          done += 1;
+        } else if (mode === "send") {
+          // Pick the most recent unsent pitch for this lead
+          const { data: pitch } = await supabase
+            .from("pitches")
+            .select("id, sent_at")
+            .eq("lead_id", leadId)
+            .is("sent_at", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (!pitch) {
+            skipped += 1;
+          } else {
+            const { data, error } = await supabase.functions.invoke("send-pitch", {
+              body: { pitchId: pitch.id },
+            });
+            if (error) throw error;
+            if ((data as any)?.error) throw new Error((data as any).error);
+            done += 1;
+          }
+        }
       } catch (e: any) {
-        console.error("Bulk draft failed for", leadId, e);
+        console.error(`Bulk ${mode} failed for`, leadId, e);
         failed += 1;
       }
-      setJob((j) => ({ ...j, done: done, failed: failed }));
+      setJob((j) => ({ ...j, done, failed, skipped }));
     }
 
     setJob((j) => ({ ...j, running: false, current: null }));
+    const verb = mode === "draft" ? "drafted" : mode === "enrich" ? "enriched" : "sent";
     toast({
-      title: cancelRef.current ? "Bulk draft canceled" : "Bulk draft complete",
-      description: `${done} drafted${failed ? `, ${failed} failed` : ""}.`,
+      title: cancelRef.current ? `Bulk ${mode} canceled` : `Bulk ${mode} complete`,
+      description:
+        `${done} ${verb}` +
+        (skipped ? `, ${skipped} skipped (no draft / no email)` : "") +
+        (failed ? `, ${failed} failed` : "."),
       variant: failed > 0 ? "destructive" : "default",
     });
     onComplete();
@@ -85,35 +125,50 @@ export const BulkDraftBar = ({ selectedIds, onClear, onComplete }: Props) => {
 
   if (selectedIds.length === 0 && !job.running) return null;
 
-  const pct = job.total > 0 ? Math.round(((job.done + job.failed) / job.total) * 100) : 0;
+  const pct = job.total > 0 ? Math.round(((job.done + job.failed + job.skipped) / job.total) * 100) : 0;
+
+  const modeLabel = mode === "draft" ? "Draft" : mode === "enrich" ? "Enrich" : "Send";
+  const ModeIcon = mode === "draft" ? Sparkles : mode === "enrich" ? Globe : Send;
 
   return (
     <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-md border bg-card p-3 shadow-sm">
-      <span className="text-sm font-medium">
-        {selectedIds.length} selected
-      </span>
+      <span className="text-sm font-medium">{selectedIds.length} selected</span>
 
       {!job.running && (
         <>
-          <Select value={templateId ?? "none"} onValueChange={(v) => setTemplateId(v === "none" ? null : v)}>
-            <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Template" /></SelectTrigger>
+          <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
+            <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">No template</SelectItem>
-              {templates.map((t) => (
-                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-              ))}
+              <SelectItem value="draft">Draft pitch</SelectItem>
+              <SelectItem value="enrich">Enrich website</SelectItem>
+              <SelectItem value="send">Send pitch</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={tone} onValueChange={setTone}>
-            <SelectTrigger className="h-9 w-[170px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {TONES.map((t) => (
-                <SelectItem key={t} value={t}>{t}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={startJob} size="sm">
-            <Sparkles className="h-4 w-4" /> Draft {selectedIds.length} pitch{selectedIds.length === 1 ? "" : "es"}
+
+          {mode === "draft" && (
+            <>
+              <Select value={templateId ?? "none"} onValueChange={(v) => setTemplateId(v === "none" ? null : v)}>
+                <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Template" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No template</SelectItem>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={tone} onValueChange={setTone}>
+                <SelectTrigger className="h-9 w-[170px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TONES.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
+
+          <Button onClick={runJob} size="sm">
+            <ModeIcon className="h-4 w-4" /> {modeLabel} {selectedIds.length}
           </Button>
           <Button variant="ghost" size="sm" onClick={onClear}>
             <X className="h-4 w-4" /> Clear
@@ -129,7 +184,8 @@ export const BulkDraftBar = ({ selectedIds, onClear, onComplete }: Props) => {
               <Progress value={pct} className="h-2" />
             </div>
             <span className="whitespace-nowrap text-xs text-muted-foreground">
-              {job.done + job.failed} / {job.total}
+              {job.done + job.failed + job.skipped} / {job.total}
+              {job.skipped > 0 && <span className="ml-1">({job.skipped} skipped)</span>}
               {job.failed > 0 && <span className="ml-1 text-destructive">({job.failed} failed)</span>}
             </span>
           </div>
