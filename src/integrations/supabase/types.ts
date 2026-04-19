@@ -14,7 +14,255 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      campaigns: {
+        Row: {
+          category: string | null
+          city: string | null
+          created_at: string
+          id: string
+          keywords: string | null
+          name: string
+          offering_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          city?: string | null
+          created_at?: string
+          id?: string
+          keywords?: string | null
+          name: string
+          offering_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          city?: string | null
+          created_at?: string
+          id?: string
+          keywords?: string | null
+          name?: string
+          offering_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_offering_id_fkey"
+            columns: ["offering_id"]
+            isOneToOne: false
+            referencedRelation: "offerings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leads: {
+        Row: {
+          address: string | null
+          business_name: string
+          campaign_id: string | null
+          contact_email: string | null
+          contact_name: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          phone: string | null
+          status: Database["public"]["Enums"]["lead_status"]
+          updated_at: string
+          user_id: string
+          website: string | null
+        }
+        Insert: {
+          address?: string | null
+          business_name: string
+          campaign_id?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          phone?: string | null
+          status?: Database["public"]["Enums"]["lead_status"]
+          updated_at?: string
+          user_id: string
+          website?: string | null
+        }
+        Update: {
+          address?: string | null
+          business_name?: string
+          campaign_id?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          phone?: string | null
+          status?: Database["public"]["Enums"]["lead_status"]
+          updated_at?: string
+          user_id?: string
+          website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      offerings: {
+        Row: {
+          created_at: string
+          demo_url: string | null
+          id: string
+          ideal_customer: string | null
+          pricing: string | null
+          problem_solved: string | null
+          screenshot_url: string | null
+          status: string
+          tagline: string | null
+          target_audience: string | null
+          testimonial: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          demo_url?: string | null
+          id?: string
+          ideal_customer?: string | null
+          pricing?: string | null
+          problem_solved?: string | null
+          screenshot_url?: string | null
+          status?: string
+          tagline?: string | null
+          target_audience?: string | null
+          testimonial?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          demo_url?: string | null
+          id?: string
+          ideal_customer?: string | null
+          pricing?: string | null
+          problem_solved?: string | null
+          screenshot_url?: string | null
+          status?: string
+          tagline?: string | null
+          target_audience?: string | null
+          testimonial?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      pitches: {
+        Row: {
+          body: string | null
+          created_at: string
+          id: string
+          lead_id: string
+          sent_at: string | null
+          subject: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          lead_id: string
+          sent_at?: string | null
+          subject?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string
+          sent_at?: string | null
+          subject?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pitches_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      templates: {
+        Row: {
+          body: string | null
+          created_at: string
+          id: string
+          name: string
+          subject: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          subject?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          subject?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +271,15 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      lead_status:
+        | "new"
+        | "enriched"
+        | "drafted"
+        | "sent"
+        | "opened"
+        | "replied"
+        | "won"
+        | "lost"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +406,17 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      lead_status: [
+        "new",
+        "enriched",
+        "drafted",
+        "sent",
+        "opened",
+        "replied",
+        "won",
+        "lost",
+      ],
+    },
   },
 } as const
