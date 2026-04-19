@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Save, Loader2, Copy } from "lucide-react";
+import { Sparkles, Save, Loader2, Copy, ChevronDown, ChevronRight, Pencil, ArrowUpToLine, Trash2, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Lead = { id: string; business_name: string; status: string };
@@ -52,6 +52,14 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
   const [body, setBody] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editSubject, setEditSubject] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [revisingId, setRevisingId] = useState<string | null>(null);
+  const [reviseInstructions, setReviseInstructions] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [revising, setRevising] = useState(false);
 
   useEffect(() => {
     if (!open || !lead) return;
