@@ -139,6 +139,115 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
     toast({ title: "Copied to clipboard" });
   };
 
+  const refreshPitches = async () => {
+    if (!lead) return;
+    const { data: pts } = await supabase
+      .from("pitches")
+      .select("id,subject,body,created_at,sent_at")
+      .eq("lead_id", lead.id)
+      .order("created_at", { ascending: false });
+    setPitches((pts as Pitch[]) ?? []);
+  };
+
+  const copyPitch = async (p: Pitch) => {
+    await navigator.clipboard.writeText(`Subject: ${p.subject ?? ""}\n\n${p.body ?? ""}`);
+    toast({ title: "Copied to clipboard" });
+  };
+
+  const loadIntoEditor = (p: Pitch) => {
+    setSubject(p.subject ?? "");
+    setBody(p.body ?? "");
+    toast({ title: "Loaded into editor", description: "Edit and Save to create a new version." });
+  };
+
+  const startEdit = (p: Pitch) => {
+    setEditingId(p.id);
+    setEditSubject(p.subject ?? "");
+    setEditBody(p.body ?? "");
+    setRevisingId(null);
+    setExpandedId(p.id);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditSubject("");
+    setEditBody("");
+  };
+
+  const saveEdit = async (p: Pitch) => {
+    setSavingEdit(true);
+    const { error } = await supabase
+      .from("pitches")
+      .update({ subject: editSubject || null, body: editBody || null })
+      .eq("id", p.id);
+    setSavingEdit(false);
+    if (error) {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Pitch updated" });
+    cancelEdit();
+    await refreshPitches();
+  };
+
+  const deletePitch = async (p: Pitch) => {
+    if (!confirm("Delete this pitch? This cannot be undone.")) return;
+    const { error } = await supabase.from("pitches").delete().eq("id", p.id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Pitch deleted" });
+    if (expandedId === p.id) setExpandedId(null);
+    if (editingId === p.id) cancelEdit();
+    await refreshPitches();
+  };
+
+  const startRevise = (p: Pitch) => {
+    setRevisingId(p.id);
+    setReviseInstructions("");
+    setEditingId(null);
+    setExpandedId(p.id);
+  };
+
+  const runRevise = async (p: Pitch) => {
+    if (!lead) return;
+    if (!reviseInstructions.trim()) {
+      toast({ title: "Add instructions", description: "Tell the AI what to change.", variant: "destructive" });
+      return;
+    }
+    setRevising(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("draft-pitch", {
+        body: {
+          leadId: lead.id,
+          templateId,
+          tone,
+          basePitch: { subject: p.subject, body: p.body },
+          instructions: reviseInstructions,
+        },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const newSubject = (data as any).subject ?? "";
+      const newBody = (data as any).body ?? "";
+      // Overwrite this pitch with the revised version
+      const { error: upErr } = await supabase
+        .from("pitches")
+        .update({ subject: newSubject, body: newBody })
+        .eq("id", p.id);
+      if (upErr) throw upErr;
+      toast({ title: "Pitch revised" });
+      setRevisingId(null);
+      setReviseInstructions("");
+      await refreshPitches();
+    } catch (e: any) {
+      toast({ title: "Revise failed", description: e?.message ?? "AI revision failed.", variant: "destructive" });
+    } finally {
+      setRevising(false);
+    }
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
