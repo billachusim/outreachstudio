@@ -11,7 +11,7 @@ const corsHeaders = {
 };
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
-const DEFAULT_DAILY_CAP = 50;
+const DEFAULT_DAILY_CAP = 5; // Warm-up: 5/day for first 3 days, then ramp 15 → 30 → 50
 // Verified domain: techfaculty.ng (Resend)
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
 const REPLY_TO = "thetechfaculty@gmail.com";

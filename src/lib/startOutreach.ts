@@ -13,7 +13,7 @@ export async function startOutreach(opts: {
       user_id: opts.userId,
       campaign_id: opts.campaignId,
       target_lead_count: opts.targetLeadCount ?? 20,
-      daily_send_cap: opts.dailySendCap ?? 50,
+      daily_send_cap: opts.dailySendCap ?? 5,
       state: "queued",
     })
     .select("id")
