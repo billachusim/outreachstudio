@@ -73,6 +73,7 @@ export type Database = {
           category: string | null
           city: string | null
           created_at: string
+          discovery_source: string
           id: string
           keywords: string | null
           name: string
@@ -85,6 +86,7 @@ export type Database = {
           category?: string | null
           city?: string | null
           created_at?: string
+          discovery_source?: string
           id?: string
           keywords?: string | null
           name: string
@@ -97,6 +99,7 @@ export type Database = {
           category?: string | null
           city?: string | null
           created_at?: string
+          discovery_source?: string
           id?: string
           keywords?: string | null
           name?: string
