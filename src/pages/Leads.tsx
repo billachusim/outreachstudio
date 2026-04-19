@@ -141,6 +141,18 @@ const Leads = () => {
     load();
   };
 
+  const sendWhatsApp = async (lead: Lead) => {
+    if (!lead.phone) return toast({ title: "No phone", description: "Add a phone number to this lead first.", variant: "destructive" });
+    const body = window.prompt(`WhatsApp message to ${lead.business_name} (${lead.phone}):`, "");
+    if (!body?.trim()) return;
+    const { data, error } = await supabase.functions.invoke("send-whatsapp", { body: { leadId: lead.id, body } });
+    if (error || (data && data.error)) {
+      return toast({ title: "WhatsApp failed", description: error?.message || data?.error, variant: "destructive" });
+    }
+    toast({ title: "WhatsApp sent", description: `Delivered to ${lead.phone}` });
+    load();
+  };
+
   return (
     <div className="container mx-auto max-w-7xl space-y-6 p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
