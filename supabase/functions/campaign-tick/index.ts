@@ -138,10 +138,11 @@ Deno.serve(async (req) => {
     // Load campaign
     const { data: campaign } = await supabase
       .from("campaigns")
-      .select("id, name, city, category, keywords")
+      .select("id, name, city, category, keywords, discovery_source")
       .eq("id", run.campaign_id)
       .maybeSingle();
     if (!campaign) return await fail("Campaign deleted");
+    const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? "";
 
     // STATE: queued -> discovering (just transition + log)
     if (run.state === "queued") {
@@ -164,6 +165,72 @@ Deno.serve(async (req) => {
         return json(200, { ok: true, transition: "discovering->enriching" });
       }
 
+      const source = (campaign as any).discovery_source ?? "firecrawl";
+
+      // === Google Places branch ===
+      if (source === "google_places") {
+        if (!GOOGLE_PLACES_API_KEY) return await fail("Google Places API key not configured.");
+        const wanted = Math.min(20, run.target_lead_count - have);
+        const textParts: string[] = [];
+        if (campaign.category) textParts.push(campaign.category);
+        if (campaign.keywords) textParts.push(campaign.keywords);
+        if (campaign.city) textParts.push(`in ${campaign.city}`);
+        if (textParts.length === 0) textParts.push(campaign.name);
+        const textQuery = textParts.join(" ");
+
+        const pres = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+            "X-Goog-FieldMask": "places.displayName,places.websiteUri,places.formattedAddress,places.internationalPhoneNumber,places.id",
+          },
+          body: JSON.stringify({ textQuery, pageSize: Math.min(20, Math.max(wanted, 5)) }),
+        });
+        const pjson = await pres.json();
+        if (!pres.ok) {
+          await logEvent("error", `Google Places: ${pjson?.error?.message ?? pres.statusText}`, "error");
+          await updateRun({ state: "enriching" as never });
+          return json(200, { ok: true, message: "Places search failed, moving on" });
+        }
+        const places: Array<any> = pjson.places ?? [];
+
+        const { data: existingP } = await supabase
+          .from("leads").select("website, business_name").eq("campaign_id", campaign.id);
+        const existingHostsP = new Set((existingP ?? []).map((l) => l.website ? rootDomain(l.website) : null).filter(Boolean) as string[]);
+        const existingNamesP = new Set((existingP ?? []).map((l) => (l.business_name ?? "").toLowerCase()));
+
+        let insertedP = 0;
+        for (const p of places) {
+          if (insertedP >= wanted) break;
+          const name = p?.displayName?.text ?? null;
+          if (!name) continue;
+          const website = p?.websiteUri ?? null;
+          const host = website ? rootDomain(website) : null;
+          if (host && existingHostsP.has(host)) continue;
+          if (existingNamesP.has(name.toLowerCase())) continue;
+          if (host) existingHostsP.add(host);
+          existingNamesP.add(name.toLowerCase());
+
+          const { error: insErr } = await supabase.from("leads").insert({
+            user_id: run.user_id,
+            campaign_id: campaign.id,
+            business_name: name,
+            website: website,
+            address: p?.formattedAddress ?? null,
+            phone: p?.internationalPhoneNumber ?? null,
+            status: "new",
+          });
+          if (!insErr) insertedP++;
+        }
+        const newTotalP = have + insertedP;
+        await logEvent("discovered", `Google Places: found ${insertedP} new lead${insertedP === 1 ? "" : "s"} (${newTotalP}/${run.target_lead_count}).`);
+        const nextStateP = newTotalP >= run.target_lead_count || insertedP === 0 ? "enriching" : "discovering";
+        await updateRun({ state: nextStateP as never, leads_found: newTotalP });
+        return json(200, { ok: true, runId: run.id, source: "google_places", inserted: insertedP, total: newTotalP, nextState: nextStateP });
+      }
+
+      // === Firecrawl branch (default) ===
       if (!FIRECRAWL_API_KEY) {
         return await fail("Firecrawl not connected — cannot discover leads.");
       }

@@ -1,0 +1,1 @@
+ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS discovery_source text NOT NULL DEFAULT 'firecrawl' CHECK (discovery_source IN ('firecrawl','google_places'));
