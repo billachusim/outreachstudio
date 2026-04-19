@@ -1,1 +1,4 @@
 project_id = "rsuqfpugyztpndjdkpwb"
+
+[functions.campaign-tick]
+verify_jwt = false
