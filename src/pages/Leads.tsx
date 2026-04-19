@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Sparkles } from "lucide-react";
+import { Plus, Trash2, Sparkles, MessageCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PitchDrawer } from "@/components/PitchDrawer";
 import { BulkDraftBar } from "@/components/BulkDraftBar";
@@ -306,6 +306,11 @@ const Leads = () => {
                       >
                         <Sparkles className="h-4 w-4" />
                       </Button>
+                      {l.phone && (
+                        <Button variant="ghost" size="icon" title="Send WhatsApp" onClick={() => sendWhatsApp(l)}>
+                          <MessageCircle className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" onClick={() => handleDelete(l.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
