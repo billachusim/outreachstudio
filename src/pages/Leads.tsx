@@ -226,7 +226,7 @@ const Leads = () => {
                 <TableHead>Contact</TableHead>
                 <TableHead>Website</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-12" />
+                <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
