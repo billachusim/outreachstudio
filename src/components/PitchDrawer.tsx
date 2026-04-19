@@ -19,10 +19,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Save, Loader2, Copy, ChevronDown, ChevronRight, Pencil, ArrowUpToLine, Trash2, Wand2 } from "lucide-react";
+import { Sparkles, Save, Loader2, Copy, ChevronDown, ChevronRight, Pencil, ArrowUpToLine, Trash2, Wand2, Send, Globe, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-type Lead = { id: string; business_name: string; status: string };
+type Lead = {
+  id: string;
+  business_name: string;
+  status: string;
+  website?: string | null;
+  contact_email?: string | null;
+  contact_name?: string | null;
+};
 type Template = { id: string; name: string };
 type Pitch = {
   id: string;
