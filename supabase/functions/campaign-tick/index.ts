@@ -138,10 +138,11 @@ Deno.serve(async (req) => {
     // Load campaign
     const { data: campaign } = await supabase
       .from("campaigns")
-      .select("id, name, city, category, keywords")
+      .select("id, name, city, category, keywords, discovery_source")
       .eq("id", run.campaign_id)
       .maybeSingle();
     if (!campaign) return await fail("Campaign deleted");
+    const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? "";
 
     // STATE: queued -> discovering (just transition + log)
     if (run.state === "queued") {
