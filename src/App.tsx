@@ -14,6 +14,7 @@ import Leads from "./pages/Leads";
 import Templates from "./pages/Templates";
 import Inbox from "./pages/Inbox";
 import Chat from "./pages/Chat";
+import Memory from "./pages/Memory";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -41,6 +42,7 @@ const App = () => (
               <Route path="/templates" element={<Templates />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/chat" element={<Chat />} />
+              <Route path="/memory" element={<Memory />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
