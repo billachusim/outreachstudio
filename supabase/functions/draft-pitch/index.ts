@@ -11,6 +11,10 @@ interface DraftBody {
   templateId?: string | null;
   tone?: string | null;
   save?: boolean;
+  // Optional revision context: when present, the AI will revise this pitch
+  // instead of writing one from scratch.
+  basePitch?: { subject?: string | null; body?: string | null } | null;
+  instructions?: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -114,7 +118,21 @@ Body:\n${template.body ?? ""}`
 
     const toneLine = body.tone ? `Tone: ${body.tone}` : "Tone: warm, concise, professional, no fluff";
 
-    const systemPrompt = `You are an expert B2B cold-email copywriter. Write a short, personalized cold email pitch that feels human, not templated. Avoid corporate jargon, avoid superlatives, no "I hope this email finds you well". Lead with relevance to the prospect's business. Keep body under 130 words. End with one clear, low-friction call to action (e.g. a 15-min call or a reply). Do NOT invent facts about the prospect — only use what's provided.`;
+    const isRevision = !!(body.basePitch && (body.basePitch.subject || body.basePitch.body));
+
+    const systemPrompt = isRevision
+      ? `You are an expert B2B cold-email copywriter. You will REVISE an existing cold email pitch based on the user's instructions. Preserve what works, change what they ask for. Keep it human, not templated. Avoid corporate jargon, avoid superlatives, no "I hope this email finds you well". Lead with relevance. Keep body under 130 words. End with one clear, low-friction call to action. Do NOT invent facts about the prospect — only use what's provided.`
+      : `You are an expert B2B cold-email copywriter. Write a short, personalized cold email pitch that feels human, not templated. Avoid corporate jargon, avoid superlatives, no "I hope this email finds you well". Lead with relevance to the prospect's business. Keep body under 130 words. End with one clear, low-friction call to action (e.g. a 15-min call or a reply). Do NOT invent facts about the prospect — only use what's provided.`;
+
+    const revisionBlock = isRevision
+      ? `EXISTING PITCH TO REVISE
+Subject: ${body.basePitch?.subject ?? ""}
+Body:
+${body.basePitch?.body ?? ""}
+
+REVISION INSTRUCTIONS
+${body.instructions?.trim() || "Improve clarity, tighten copy, keep tone."}`
+      : "";
 
     const userPrompt = `${toneLine}
 
@@ -124,7 +142,9 @@ ${leadBlock}
 
 ${templateBlock}
 
-Write the cold email pitch now.`;
+${revisionBlock}
+
+${isRevision ? "Return the revised cold email pitch now." : "Write the cold email pitch now."}`;
 
     const aiRes = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",

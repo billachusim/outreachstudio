@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Save, Loader2, Copy } from "lucide-react";
+import { Sparkles, Save, Loader2, Copy, ChevronDown, ChevronRight, Pencil, ArrowUpToLine, Trash2, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Lead = { id: string; business_name: string; status: string };
@@ -52,6 +52,14 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
   const [body, setBody] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editSubject, setEditSubject] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [revisingId, setRevisingId] = useState<string | null>(null);
+  const [reviseInstructions, setReviseInstructions] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [revising, setRevising] = useState(false);
 
   useEffect(() => {
     if (!open || !lead) return;
@@ -131,6 +139,115 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
     toast({ title: "Copied to clipboard" });
   };
 
+  const refreshPitches = async () => {
+    if (!lead) return;
+    const { data: pts } = await supabase
+      .from("pitches")
+      .select("id,subject,body,created_at,sent_at")
+      .eq("lead_id", lead.id)
+      .order("created_at", { ascending: false });
+    setPitches((pts as Pitch[]) ?? []);
+  };
+
+  const copyPitch = async (p: Pitch) => {
+    await navigator.clipboard.writeText(`Subject: ${p.subject ?? ""}\n\n${p.body ?? ""}`);
+    toast({ title: "Copied to clipboard" });
+  };
+
+  const loadIntoEditor = (p: Pitch) => {
+    setSubject(p.subject ?? "");
+    setBody(p.body ?? "");
+    toast({ title: "Loaded into editor", description: "Edit and Save to create a new version." });
+  };
+
+  const startEdit = (p: Pitch) => {
+    setEditingId(p.id);
+    setEditSubject(p.subject ?? "");
+    setEditBody(p.body ?? "");
+    setRevisingId(null);
+    setExpandedId(p.id);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditSubject("");
+    setEditBody("");
+  };
+
+  const saveEdit = async (p: Pitch) => {
+    setSavingEdit(true);
+    const { error } = await supabase
+      .from("pitches")
+      .update({ subject: editSubject || null, body: editBody || null })
+      .eq("id", p.id);
+    setSavingEdit(false);
+    if (error) {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Pitch updated" });
+    cancelEdit();
+    await refreshPitches();
+  };
+
+  const deletePitch = async (p: Pitch) => {
+    if (!confirm("Delete this pitch? This cannot be undone.")) return;
+    const { error } = await supabase.from("pitches").delete().eq("id", p.id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Pitch deleted" });
+    if (expandedId === p.id) setExpandedId(null);
+    if (editingId === p.id) cancelEdit();
+    await refreshPitches();
+  };
+
+  const startRevise = (p: Pitch) => {
+    setRevisingId(p.id);
+    setReviseInstructions("");
+    setEditingId(null);
+    setExpandedId(p.id);
+  };
+
+  const runRevise = async (p: Pitch) => {
+    if (!lead) return;
+    if (!reviseInstructions.trim()) {
+      toast({ title: "Add instructions", description: "Tell the AI what to change.", variant: "destructive" });
+      return;
+    }
+    setRevising(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("draft-pitch", {
+        body: {
+          leadId: lead.id,
+          templateId,
+          tone,
+          basePitch: { subject: p.subject, body: p.body },
+          instructions: reviseInstructions,
+        },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const newSubject = (data as any).subject ?? "";
+      const newBody = (data as any).body ?? "";
+      // Overwrite this pitch with the revised version
+      const { error: upErr } = await supabase
+        .from("pitches")
+        .update({ subject: newSubject, body: newBody })
+        .eq("id", p.id);
+      if (upErr) throw upErr;
+      toast({ title: "Pitch revised" });
+      setRevisingId(null);
+      setReviseInstructions("");
+      await refreshPitches();
+    } catch (e: any) {
+      toast({ title: "Revise failed", description: e?.message ?? "AI revision failed.", variant: "destructive" });
+    } finally {
+      setRevising(false);
+    }
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
@@ -195,20 +312,124 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
           {pitches.length > 0 && (
             <div className="space-y-2 border-t pt-4">
               <h3 className="text-sm font-semibold">Pitch history ({pitches.length})</h3>
+              <p className="text-xs text-muted-foreground">
+                Tap a pitch to expand. You can copy it, load it into the editor, edit it directly, or revise it with AI.
+              </p>
               <div className="space-y-2">
-                {pitches.map((p) => (
-                  <div key={p.id} className="rounded-md border bg-muted/30 p-3 text-sm">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="font-medium">{p.subject || "(no subject)"}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(p.created_at).toLocaleString()}
-                      </span>
+                {pitches.map((p) => {
+                  const isOpen = expandedId === p.id;
+                  const isEditing = editingId === p.id;
+                  const isRevising = revisingId === p.id;
+                  return (
+                    <div key={p.id} className="rounded-md border bg-muted/30 text-sm">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(isOpen ? null : p.id)}
+                        className="flex w-full items-center justify-between gap-2 p-3 text-left hover:bg-muted/50"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          {isOpen ? (
+                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          )}
+                          <span className="truncate font-medium">{p.subject || "(no subject)"}</span>
+                        </div>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {new Date(p.created_at).toLocaleString()}
+                        </span>
+                      </button>
+
+                      {isOpen && (
+                        <div className="space-y-3 border-t p-3">
+                          {!isEditing && (
+                            <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded bg-background p-3 font-sans text-xs leading-relaxed">
+                              {p.body || "(empty)"}
+                            </pre>
+                          )}
+
+                          {isEditing && (
+                            <div className="space-y-2">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Subject</Label>
+                                <Input
+                                  value={editSubject}
+                                  onChange={(e) => setEditSubject(e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Body</Label>
+                                <Textarea
+                                  rows={10}
+                                  value={editBody}
+                                  onChange={(e) => setEditBody(e.target.value)}
+                                />
+                              </div>
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => saveEdit(p)} disabled={savingEdit}>
+                                  {savingEdit ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                                  Save changes
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={cancelEdit}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {isRevising && (
+                            <div className="space-y-2 rounded-md border border-dashed p-2">
+                              <Label className="text-xs">What should the AI change?</Label>
+                              <Textarea
+                                rows={3}
+                                value={reviseInstructions}
+                                onChange={(e) => setReviseInstructions(e.target.value)}
+                                placeholder="e.g. Make it shorter, mention their fleet size, change CTA to a WhatsApp reply"
+                              />
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => runRevise(p)} disabled={revising}>
+                                  {revising ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                                  Revise with AI
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setRevisingId(null)} disabled={revising}>
+                                  Cancel
+                                </Button>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">
+                                Replaces this pitch with the AI-revised version.
+                              </p>
+                            </div>
+                          )}
+
+                          {!isEditing && !isRevising && (
+                            <div className="flex flex-wrap gap-2">
+                              <Button size="sm" variant="outline" onClick={() => copyPitch(p)}>
+                                <Copy className="h-3 w-3" /> Copy
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => loadIntoEditor(p)}>
+                                <ArrowUpToLine className="h-3 w-3" /> Load to editor
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => startEdit(p)}>
+                                <Pencil className="h-3 w-3" /> Edit
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => startRevise(p)}>
+                                <Wand2 className="h-3 w-3" /> Edit with AI
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="ml-auto text-destructive hover:text-destructive"
+                                onClick={() => deletePitch(p)}
+                              >
+                                <Trash2 className="h-3 w-3" /> Delete
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <p className="line-clamp-4 whitespace-pre-wrap text-xs text-muted-foreground">
-                      {p.body || "(empty)"}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
