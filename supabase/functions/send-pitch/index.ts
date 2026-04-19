@@ -14,7 +14,7 @@ const GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
 const DEFAULT_DAILY_CAP = 50;
 // Verified domain: techfaculty.ng (Resend)
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
-const REPLY_TO = "outreach@techfaculty.ng"; // TODO: swap to Gmail when provided
+const REPLY_TO = "thetechfaculty@gmail.com";
 
 interface Body {
   pitchId: string;
