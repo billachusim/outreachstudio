@@ -23,7 +23,7 @@ const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const RESEND_GATEWAY = "https://connector-gateway.lovable.dev/resend";
 // Verified domain: techfaculty.ng (Resend)
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
-const REPLY_TO = "outreach@techfaculty.ng"; // TODO: swap to Gmail when provided
+const REPLY_TO = "thetechfaculty@gmail.com";
 
 const json = (status: number, payload: unknown) =>
   new Response(JSON.stringify(payload), {
