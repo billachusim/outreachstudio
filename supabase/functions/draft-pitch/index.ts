@@ -10,6 +10,7 @@ interface DraftBody {
   leadId: string;
   templateId?: string | null;
   tone?: string | null;
+  save?: boolean;
 }
 
 Deno.serve(async (req) => {
@@ -201,8 +202,27 @@ Write the cold email pitch now.`;
     }
     const parsed = JSON.parse(argsStr) as { subject: string; body: string };
 
+    if (body.save) {
+      const { error: insErr } = await supabase.from("pitches").insert({
+        user_id: userData.user.id,
+        lead_id: lead.id,
+        subject: parsed.subject,
+        body: parsed.body,
+      });
+      if (insErr) {
+        console.error("pitch insert failed", insErr);
+        return new Response(JSON.stringify({ error: insErr.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (lead.status === "new") {
+        await supabase.from("leads").update({ status: "drafted" }).eq("id", lead.id);
+      }
+    }
+
     return new Response(
-      JSON.stringify({ subject: parsed.subject, body: parsed.body }),
+      JSON.stringify({ subject: parsed.subject, body: parsed.body, saved: !!body.save }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
