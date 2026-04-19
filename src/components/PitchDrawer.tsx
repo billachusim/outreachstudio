@@ -315,6 +315,35 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
           </SheetDescription>
         </SheetHeader>
 
+        {lead && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                {lead.contact_email ? (
+                  <span className="inline-flex items-center gap-1 text-success">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> {lead.contact_email}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">No contact email yet</span>
+                )}
+              </div>
+              {lead.website && (
+                <div className="truncate text-muted-foreground">{lead.website}</div>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleEnrich}
+              disabled={enriching || !lead.website}
+              title={lead.website ? "Scrape website for email + summary" : "Add a website first"}
+            >
+              {enriching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}
+              {lead.contact_email ? "Re-enrich" : "Enrich"}
+            </Button>
+          </div>
+        )}
+
         <div className="mt-6 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
@@ -460,6 +489,22 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
 
                           {!isEditing && !isRevising && (
                             <div className="flex flex-wrap gap-2">
+                              {p.sent_at ? (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-success/15 px-2 py-1 text-xs text-success">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Sent {new Date(p.sent_at).toLocaleString()}
+                                </span>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleSendPitch(p)}
+                                  disabled={sendingId === p.id || !lead?.contact_email}
+                                  title={lead?.contact_email ? `Send to ${lead.contact_email}` : "Lead has no email"}
+                                >
+                                  {sendingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                                  Send
+                                </Button>
+                              )}
                               <Button size="sm" variant="outline" onClick={() => copyPitch(p)}>
                                 <Copy className="h-3 w-3" /> Copy
                               </Button>
