@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      campaign_runs: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          daily_send_cap: number
+          error: string | null
+          id: string
+          last_step_at: string | null
+          leads_drafted: number
+          leads_enriched: number
+          leads_failed: number
+          leads_found: number
+          leads_sent: number
+          state: Database["public"]["Enums"]["run_state"]
+          target_lead_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          daily_send_cap?: number
+          error?: string | null
+          id?: string
+          last_step_at?: string | null
+          leads_drafted?: number
+          leads_enriched?: number
+          leads_failed?: number
+          leads_found?: number
+          leads_sent?: number
+          state?: Database["public"]["Enums"]["run_state"]
+          target_lead_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          daily_send_cap?: number
+          error?: string | null
+          id?: string
+          last_step_at?: string | null
+          leads_drafted?: number
+          leads_enriched?: number
+          leads_failed?: number
+          leads_found?: number
+          leads_sent?: number
+          state?: Database["public"]["Enums"]["run_state"]
+          target_lead_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       campaigns: {
         Row: {
           category: string | null
@@ -57,6 +111,74 @@ export type Database = {
             columns: ["offering_id"]
             isOneToOne: false
             referencedRelation: "offerings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_conversations: {
+        Row: {
+          created_at: string
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      chat_messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          role: string
+          tool_call_id: string | null
+          tool_calls: Json | null
+          tool_name: string | null
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          role: string
+          tool_call_id?: string | null
+          tool_calls?: Json | null
+          tool_name?: string | null
+          user_id: string
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          role?: string
+          tool_call_id?: string | null
+          tool_calls?: Json | null
+          tool_name?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_conversations"
             referencedColumns: ["id"]
           },
         ]
@@ -233,6 +355,50 @@ export type Database = {
         }
         Relationships: []
       }
+      run_events: {
+        Row: {
+          campaign_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          lead_id: string | null
+          level: string
+          message: string
+          run_id: string | null
+          user_id: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          lead_id?: string | null
+          level?: string
+          message: string
+          run_id?: string | null
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          lead_id?: string | null
+          level?: string
+          message?: string
+          run_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "run_events_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       templates: {
         Row: {
           body: string | null
@@ -280,6 +446,15 @@ export type Database = {
         | "replied"
         | "won"
         | "lost"
+      run_state:
+        | "queued"
+        | "discovering"
+        | "enriching"
+        | "drafting"
+        | "sending"
+        | "paused"
+        | "done"
+        | "failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -416,6 +591,16 @@ export const Constants = {
         "replied",
         "won",
         "lost",
+      ],
+      run_state: [
+        "queued",
+        "discovering",
+        "enriching",
+        "drafting",
+        "sending",
+        "paused",
+        "done",
+        "failed",
       ],
     },
   },
