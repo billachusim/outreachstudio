@@ -67,6 +67,8 @@ export const PitchDrawer = ({ lead, open, onOpenChange, onSaved }: Props) => {
   const [reviseInstructions, setReviseInstructions] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [revising, setRevising] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !lead) return;
