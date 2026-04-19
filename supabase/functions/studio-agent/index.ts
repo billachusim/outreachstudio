@@ -45,7 +45,7 @@ const TOOLS = [
         properties: {
           campaign_id: { type: "string", description: "The campaign UUID to run" },
           target_lead_count: { type: "number", description: "How many leads to target. Default 20.", default: 20 },
-          daily_send_cap: { type: "number", description: "Max emails per day. Default 50.", default: 50 },
+          daily_send_cap: { type: "number", description: "Max emails per day. Default 5 during warm-up.", default: 5 },
         },
         required: ["campaign_id"],
         additionalProperties: false,
@@ -121,7 +121,7 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
       return data ?? [];
     }
     case "start_outreach": {
-      const { campaign_id, target_lead_count = 20, daily_send_cap = 50 } = args;
+      const { campaign_id, target_lead_count = 20, daily_send_cap = 5 } = args;
       const { data: camp } = await supabase
         .from("campaigns").select("id, name").eq("id", campaign_id).eq("user_id", userId).maybeSingle();
       if (!camp) return { error: "Campaign not found" };
