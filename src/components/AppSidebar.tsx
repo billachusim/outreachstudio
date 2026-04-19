@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, Megaphone, Users, FileText, Inbox, Sparkles, LogOut, MessageSquare, Brain } from "lucide-react";
+import { LayoutDashboard, Package, Megaphone, Users, FileText, Inbox, Sparkles, LogOut, MessageSquare, Brain, Radio } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Sidebar,
@@ -23,6 +23,7 @@ const items = [
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Templates", url: "/templates", icon: FileText },
   { title: "Inbox", url: "/inbox", icon: Inbox },
+  { title: "Channels", url: "/channels", icon: Radio },
   { title: "Memory", url: "/memory", icon: Brain },
 ];
 
