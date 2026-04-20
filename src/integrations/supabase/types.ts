@@ -379,7 +379,9 @@ export type Database = {
           acted_on: boolean
           created_at: string
           id: string
+          matched_offerings: string[] | null
           posted_at: string | null
+          published_at: string | null
           relevance_score: number | null
           source: string
           summary: string | null
@@ -392,7 +394,9 @@ export type Database = {
           acted_on?: boolean
           created_at?: string
           id?: string
+          matched_offerings?: string[] | null
           posted_at?: string | null
+          published_at?: string | null
           relevance_score?: number | null
           source: string
           summary?: string | null
@@ -405,7 +409,9 @@ export type Database = {
           acted_on?: boolean
           created_at?: string
           id?: string
+          matched_offerings?: string[] | null
           posted_at?: string | null
+          published_at?: string | null
           relevance_score?: number | null
           source?: string
           summary?: string | null
