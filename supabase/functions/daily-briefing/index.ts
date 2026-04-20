@@ -28,11 +28,14 @@ Deno.serve(async (req) => {
         .from("daily_briefings").select("id").eq("user_id", userId).eq("briefing_date", today).maybeSingle();
       if (existing) continue;
 
-      const [pitchesRes, eventsRes, runsRes, warmRes] = await Promise.all([
+      const [pitchesRes, eventsRes, runsRes, warmRes, intelRes] = await Promise.all([
         supabase.from("pitches").select("id, sent_at").eq("user_id", userId).gte("sent_at", since),
         supabase.from("pitch_events").select("event_type").eq("user_id", userId).gte("occurred_at", since),
         supabase.from("campaign_runs").select("state, leads_sent").eq("user_id", userId).gte("updated_at", since),
         supabase.from("leads").select("id, business_name, score, status").eq("user_id", userId).order("score", { ascending: false }).limit(5),
+        supabase.from("intel_items").select("title, source, url, relevance_score, tags, summary")
+          .eq("user_id", userId).eq("acted_on", false)
+          .gte("created_at", since).order("relevance_score", { ascending: false }).limit(5),
       ]);
 
       const sent = pitchesRes.data?.length ?? 0;
@@ -41,7 +44,8 @@ Deno.serve(async (req) => {
       const bounces = (eventsRes.data ?? []).filter((e: any) => e.event_type === "bounced").length;
       const activeRuns = (runsRes.data ?? []).filter((r: any) => !["done", "failed"].includes(r.state)).length;
 
-      const metrics = { sent, opens, replies, bounces, active_runs: activeRuns };
+      const intelItems = intelRes.data ?? [];
+      const metrics = { sent, opens, replies, bounces, active_runs: activeRuns, intel_count: intelItems.length };
 
       const ai = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -49,8 +53,8 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           model: "google/gemini-2.5-flash-lite",
           messages: [
-            { role: "system", content: "You are the morning briefing voice for an outreach studio. 4–6 short bullets, plain English, no fluff. Highlight wins, blockers, and what to do today. Mention warm leads if any." },
-            { role: "user", content: `Last 24h metrics: ${JSON.stringify(metrics)}\nTop leads by score: ${JSON.stringify(warmRes.data ?? [])}\nWrite the morning briefing.` },
+            { role: "system", content: "You are the morning briefing voice for an outreach studio. 4–6 short bullets, plain English, no fluff. Highlight wins, blockers, warm leads, and 1–3 fresh news triggers worth pitching off (with the headline + source). Suggest concrete next actions." },
+            { role: "user", content: `Last 24h metrics: ${JSON.stringify(metrics)}\nTop leads by score: ${JSON.stringify(warmRes.data ?? [])}\nFresh intel (rank top 3 by relevance):\n${JSON.stringify(intelItems)}\nWrite the morning briefing.` },
           ],
         }),
       });
@@ -60,7 +64,8 @@ Deno.serve(async (req) => {
         bodyMd = aj?.choices?.[0]?.message?.content ?? "";
       }
       if (!bodyMd) {
-        bodyMd = `**Morning brief**\n\n- Sent: ${sent}\n- Opens: ${opens}\n- Replies: ${replies}\n- Bounces: ${bounces}\n- Active runs: ${activeRuns}`;
+        const intelLines = intelItems.slice(0, 3).map((i: any) => `  - [${i.source}] ${i.title}`).join("\n");
+        bodyMd = `**Morning brief**\n\n- Sent: ${sent}\n- Opens: ${opens}\n- Replies: ${replies}\n- Bounces: ${bounces}\n- Active runs: ${activeRuns}${intelItems.length ? `\n- Fresh intel (${intelItems.length}):\n${intelLines}` : ""}`;
       }
 
       await supabase.from("daily_briefings").insert({
