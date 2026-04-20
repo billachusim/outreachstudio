@@ -140,10 +140,16 @@ Deno.serve(async (req) => {
     // Load campaign
     const { data: campaign } = await supabase
       .from("campaigns")
-      .select("id, name, city, category, keywords, discovery_source")
+      .select("id, name, city, category, keywords, discovery_source, channel, email_cap, whatsapp_cap, social_cap, follow_up_days, auto_followup, offering_id")
       .eq("id", run.campaign_id)
       .maybeSingle();
     if (!campaign) return await fail("Campaign deleted");
+    const channelKey = (campaign as any).channel ?? "email";
+    const channelCap =
+      channelKey === "email" ? (campaign as any).email_cap :
+      channelKey === "whatsapp" ? (campaign as any).whatsapp_cap :
+      (campaign as any).social_cap;
+    const effectiveCap = Math.min(run.daily_send_cap, channelCap ?? run.daily_send_cap);
     const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? "";
 
     // STATE: queued -> discovering (just transition + log)
@@ -472,8 +478,8 @@ Notes: ${lead.notes ?? ""}`;
         .from("pitches").select("id", { count: "exact", head: true })
         .eq("user_id", run.user_id).gte("sent_at", startOfDay.toISOString());
 
-      if ((sentToday ?? 0) >= run.daily_send_cap) {
-        await logEvent("info", `Daily send cap reached (${sentToday}/${run.daily_send_cap}). Pausing for today.`);
+      if ((sentToday ?? 0) >= effectiveCap) {
+        await logEvent("info", `Daily ${channelKey} cap reached (${sentToday}/${effectiveCap}). Pausing for today.`);
         await updateRun({ state: "paused" as never, error: "Daily cap reached" });
         return json(200, { ok: true, paused: true });
       }
@@ -542,8 +548,26 @@ Notes: ${lead.notes ?? ""}`;
       }
 
       const sentAt = new Date().toISOString();
+      const providerId = sendJson?.id ?? null;
       await supabase.from("pitches").update({ sent_at: sentAt }).eq("id", pitch.id);
-      await supabase.from("leads").update({ status: "sent" }).eq("id", lead.id);
+      await supabase.from("leads").update({ status: "sent", last_activity_at: sentAt }).eq("id", lead.id);
+      // Record a "sent" event so the inbox/funnel sees it even if Resend webhook isn't wired yet.
+      await supabase.from("pitch_events").insert({
+        user_id: run.user_id, pitch_id: pitch.id, lead_id: lead.id,
+        channel: "email", event_type: "sent", provider: "resend",
+        provider_message_id: providerId, recipient: lead.contact_email,
+        occurred_at: sentAt, payload: sendJson,
+      });
+      // Schedule follow-ups
+      if ((campaign as any).auto_followup && Array.isArray((campaign as any).follow_up_days)) {
+        const rows = ((campaign as any).follow_up_days as number[]).map((days, i) => ({
+          user_id: run.user_id, lead_id: lead.id, campaign_id: campaign.id,
+          parent_pitch_id: pitch.id, step: i + 1,
+          scheduled_at: new Date(Date.now() + days * 86400000).toISOString(),
+          status: "scheduled",
+        }));
+        if (rows.length) await supabase.from("pitch_sequences").insert(rows);
+      }
       await logEvent("sent", `Sent pitch to ${lead.business_name} (${lead.contact_email})`, "info", lead.id);
       await updateRun({ leads_sent: run.leads_sent + 1 });
       return json(200, { ok: true });
