@@ -301,6 +301,25 @@ const Leads = () => {
                     )}
                   </TableCell>
                   <TableCell>
+                    <div className="flex flex-col items-start gap-0.5">
+                      <Badge
+                        variant="outline"
+                        className={
+                          (l.score ?? 0) >= 70
+                            ? "border-success/50 text-success"
+                            : (l.score ?? 0) >= 40
+                              ? "border-primary/50 text-primary"
+                              : "text-muted-foreground"
+                        }
+                      >
+                        {l.score ?? 0}
+                      </Badge>
+                      {l.reply_intent && (
+                        <span className="text-[10px] capitalize text-muted-foreground">{l.reply_intent}</span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
                     <Select value={l.status} onValueChange={(v) => updateStatus(l.id, v as LeadStatus)}>
                       <SelectTrigger className="h-8 w-[130px] border-0 bg-transparent p-0">
                         <Badge className={statusVariant[l.status] + " capitalize"}>{l.status}</Badge>
