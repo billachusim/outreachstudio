@@ -5,3 +5,15 @@ verify_jwt = false
 
 [functions.whatsapp-webhook]
 verify_jwt = false
+
+[functions.resend-webhook]
+verify_jwt = false
+
+[functions.follow-up-tick]
+verify_jwt = false
+
+[functions.score-leads-nightly]
+verify_jwt = false
+
+[functions.daily-briefing]
+verify_jwt = false
