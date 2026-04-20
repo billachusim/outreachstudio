@@ -204,62 +204,7 @@ const Campaigns = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[10px] uppercase">Email/day</Label>
-                      <Input
-                        type="number" min={0} max={500}
-                        className="h-8 text-xs"
-                        value={c.email_cap ?? 5}
-                        onChange={(e) => updateCampaign(c.id, { email_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] uppercase">WApp/day</Label>
-                      <Input
-                        type="number" min={0} max={500}
-                        className="h-8 text-xs"
-                        value={c.whatsapp_cap ?? 20}
-                        onChange={(e) => updateCampaign(c.id, { whatsapp_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] uppercase">Social/day</Label>
-                      <Input
-                        type="number" min={0} max={500}
-                        className="h-8 text-xs"
-                        value={c.social_cap ?? 10}
-                        onChange={(e) => updateCampaign(c.id, { social_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-[10px] uppercase">Follow-up days (comma-separated)</Label>
-                    <Input
-                      className="h-8 text-xs"
-                      value={(c.follow_up_days ?? [3, 7, 14]).join(", ")}
-                      onChange={(e) => {
-                        const days = e.target.value
-                          .split(",")
-                          .map((s) => parseInt(s.trim(), 10))
-                          .filter((n) => Number.isFinite(n) && n > 0);
-                        updateCampaign(c.id, { follow_up_days: days });
-                      }}
-                    />
-                  </div>
-
-                  <label className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={c.auto_followup ?? true}
-                      onChange={(e) => updateCampaign(c.id, { auto_followup: e.target.checked })}
-                      className="h-3.5 w-3.5"
-                    />
-                    Auto follow-up
-                  </label>
+      </div>
 
       {campaigns.length === 0 ? (
         <Card>
