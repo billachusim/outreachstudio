@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
+import { MobileTabBar } from "@/components/MobileTabBar";
 
 export const AppLayout = () => {
   return (
@@ -18,9 +19,10 @@ export const AppLayout = () => {
               <span className="text-sm font-semibold">Outreach Studio</span>
             </div>
           </header>
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-auto pb-16 md:pb-0">
             <Outlet />
           </main>
+          <MobileTabBar />
         </div>
       </div>
     </SidebarProvider>
