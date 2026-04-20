@@ -49,6 +49,9 @@ type Lead = {
   status: LeadStatus;
   notes: string | null;
   campaign_id: string | null;
+  score: number | null;
+  last_activity_at: string | null;
+  reply_intent: string | null;
 };
 
 type Campaign = { id: string; name: string };
@@ -99,8 +102,8 @@ const Leads = () => {
     const [{ data: cs }, leadsRes] = await Promise.all([
       supabase.from("campaigns").select("id,name").order("name"),
       campaignFilter
-        ? supabase.from("leads").select("*").eq("campaign_id", campaignFilter).order("created_at", { ascending: false })
-        : supabase.from("leads").select("*").order("created_at", { ascending: false }),
+        ? supabase.from("leads").select("*").eq("campaign_id", campaignFilter).order("score", { ascending: false }).order("created_at", { ascending: false })
+        : supabase.from("leads").select("*").order("score", { ascending: false }).order("created_at", { ascending: false }),
     ]);
     setCampaigns((cs as Campaign[]) ?? []);
     setLeads((leadsRes.data as Lead[]) ?? []);
@@ -266,6 +269,7 @@ const Leads = () => {
                 <TableHead>Business</TableHead>
                 <TableHead>Contact</TableHead>
                 <TableHead>Website</TableHead>
+                <TableHead className="w-20">Score</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
@@ -295,6 +299,25 @@ const Leads = () => {
                         {l.website.replace(/^https?:\/\//, "")}
                       </a>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col items-start gap-0.5">
+                      <Badge
+                        variant="outline"
+                        className={
+                          (l.score ?? 0) >= 70
+                            ? "border-success/50 text-success"
+                            : (l.score ?? 0) >= 40
+                              ? "border-primary/50 text-primary"
+                              : "text-muted-foreground"
+                        }
+                      >
+                        {l.score ?? 0}
+                      </Badge>
+                      {l.reply_intent && (
+                        <span className="text-[10px] capitalize text-muted-foreground">{l.reply_intent}</span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Select value={l.status} onValueChange={(v) => updateStatus(l.id, v as LeadStatus)}>

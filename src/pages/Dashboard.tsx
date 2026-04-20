@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Pause, Play, Activity, Send, Sparkles } from "lucide-react";
+import { Pause, Play, Activity, Send, Sparkles, Sun, RefreshCw, Eye, MailOpen, Reply, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Run = {
@@ -26,6 +26,7 @@ type Run = {
 };
 type Campaign = { id: string; name: string };
 type Event = { id: string; kind: string; message: string; level: string; created_at: string };
+type Briefing = { id: string; briefing_date: string; body: string; metrics: any; read_at: string | null };
 
 const stateColors: Record<string, string> = {
   queued: "bg-muted text-muted-foreground",
@@ -45,28 +46,44 @@ const Dashboard = () => {
   const [campaigns, setCampaigns] = useState<Record<string, string>>({});
   const [events, setEvents] = useState<Event[]>([]);
   const [sentToday, setSentToday] = useState(0);
+  const [briefing, setBriefing] = useState<Briefing | null>(null);
+  const [funnel, setFunnel] = useState({ sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => { document.title = "Studio · Outreach Studio"; }, []);
 
   const load = async () => {
     if (!user) return;
     await seedOfferingsIfEmpty(user.id);
-    const [{ data: rs }, { data: cs }, { data: es }] = await Promise.all([
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes] = await Promise.all([
       supabase.from("campaign_runs").select("*").order("updated_at", { ascending: false }).limit(20),
       supabase.from("campaigns").select("id,name"),
       supabase.from("run_events").select("*").order("created_at", { ascending: false }).limit(20),
+      supabase.from("pitches").select("id", { count: "exact", head: true }).gte("sent_at", start.toISOString()),
+      supabase.from("daily_briefings").select("*").order("briefing_date", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("pitch_events").select("event_type").gte("occurred_at", since),
     ]);
-    setRuns((rs as Run[]) ?? []);
-    const map: Record<string, string> = {};
-    (cs as Campaign[] ?? []).forEach((c) => (map[c.id] = c.name));
-    setCampaigns(map);
-    setEvents((es as Event[]) ?? []);
 
-    const start = new Date(); start.setHours(0, 0, 0, 0);
-    const { count } = await supabase
-      .from("pitches").select("id", { count: "exact", head: true })
-      .gte("sent_at", start.toISOString());
-    setSentToday(count ?? 0);
+    setRuns((runsRes.data as Run[]) ?? []);
+    const map: Record<string, string> = {};
+    ((campsRes.data as Campaign[]) ?? []).forEach((c) => (map[c.id] = c.name));
+    setCampaigns(map);
+    setEvents((eventsRes.data as Event[]) ?? []);
+    setSentToday(sentRes.count ?? 0);
+    setBriefing((briefingRes.data as Briefing) ?? null);
+
+    const f = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
+    ((eventsFunnelRes.data as { event_type: string }[]) ?? []).forEach((e) => {
+      if (e.event_type === "delivered") f.sent++;
+      else if (e.event_type === "opened") f.opened++;
+      else if (e.event_type === "clicked") f.clicked++;
+      else if (e.event_type === "replied") f.replied++;
+      else if (e.event_type === "bounced") f.bounced++;
+    });
+    setFunnel(f);
   };
 
   useEffect(() => {
@@ -75,6 +92,8 @@ const Dashboard = () => {
       .channel("dash")
       .on("postgres_changes", { event: "*", schema: "public", table: "campaign_runs" }, load)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "run_events" }, load)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "pitch_events" }, load)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "daily_briefings" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,8 +108,31 @@ const Dashboard = () => {
     toast({ title: newState === "paused" ? "Paused" : "Resumed" });
   };
 
+  const generateBriefing = async () => {
+    setGenerating(true);
+    try {
+      const { error } = await supabase.functions.invoke("daily-briefing", { body: {} });
+      if (error) throw error;
+      toast({ title: "Briefing generated" });
+      load();
+    } catch (e: any) {
+      toast({ title: "Failed", description: e?.message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const markRead = async () => {
+    if (!briefing || briefing.read_at) return;
+    await supabase.from("daily_briefings").update({ read_at: new Date().toISOString() }).eq("id", briefing.id);
+    load();
+  };
+
   const active = runs.filter((r) => !["done", "failed"].includes(r.state));
   const finished = runs.filter((r) => ["done", "failed"].includes(r.state));
+
+  const openRate = funnel.sent > 0 ? Math.round((funnel.opened / funnel.sent) * 100) : 0;
+  const replyRate = funnel.sent > 0 ? Math.round((funnel.replied / funnel.sent) * 100) : 0;
 
   return (
     <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
@@ -112,6 +154,38 @@ const Dashboard = () => {
           </Button>
         </div>
       </div>
+
+      <Card className={!briefing?.read_at && briefing ? "border-primary/40" : ""} onClick={markRead}>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sun className="h-4 w-4" /> Daily briefing
+            {briefing && <Badge variant="outline" className="text-[10px]">{new Date(briefing.briefing_date).toLocaleDateString()}</Badge>}
+          </CardTitle>
+          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); generateBriefing(); }} disabled={generating}>
+            <RefreshCw className={generating ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {briefing ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{briefing.body}</pre>
+          ) : (
+            <p className="text-sm text-muted-foreground">No briefing yet — runs daily at 8am WAT, or click Refresh.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">7-day funnel</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <FunnelStat icon={<Send className="h-4 w-4" />} label="Delivered" value={funnel.sent} />
+            <FunnelStat icon={<Eye className="h-4 w-4" />} label="Opened" value={funnel.opened} sub={funnel.sent > 0 ? `${openRate}%` : undefined} />
+            <FunnelStat icon={<MailOpen className="h-4 w-4" />} label="Clicked" value={funnel.clicked} />
+            <FunnelStat icon={<Reply className="h-4 w-4" />} label="Replied" value={funnel.replied} sub={funnel.sent > 0 ? `${replyRate}%` : undefined} />
+            <FunnelStat icon={<AlertTriangle className="h-4 w-4" />} label="Bounced" value={funnel.bounced} tone={funnel.bounced > 0 ? "destructive" : undefined} />
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -194,5 +268,13 @@ const Dashboard = () => {
     </div>
   );
 };
+
+const FunnelStat = ({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: number; sub?: string; tone?: "destructive" }) => (
+  <div className="rounded-lg border p-3">
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">{icon} {label}</div>
+    <div className={`mt-1 text-xl font-semibold ${tone === "destructive" ? "text-destructive" : ""}`}>{value}</div>
+    {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+  </div>
+);
 
 export default Dashboard;
