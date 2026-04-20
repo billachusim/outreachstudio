@@ -38,6 +38,11 @@ type Campaign = {
   discovery_source: "firecrawl" | "google_places";
   channel: "email" | "whatsapp" | "x" | "facebook" | "instagram";
   auto_send: boolean;
+  auto_followup: boolean;
+  email_cap: number;
+  whatsapp_cap: number;
+  social_cap: number;
+  follow_up_days: number[];
   created_at: string;
 };
 
@@ -104,6 +109,12 @@ const Campaigns = () => {
     const { error } = await supabase.from("campaigns").update({ discovery_source: source } as never).eq("id", id);
     if (error) return toast({ title: "Update failed", description: error.message, variant: "destructive" });
     setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, discovery_source: source } : c)));
+  };
+
+  const updateCampaign = async (id: string, patch: Partial<Campaign>) => {
+    setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    const { error } = await supabase.from("campaigns").update(patch as never).eq("id", id);
+    if (error) toast({ title: "Update failed", description: error.message, variant: "destructive" });
   };
 
   return (
