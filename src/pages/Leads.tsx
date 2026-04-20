@@ -49,6 +49,9 @@ type Lead = {
   status: LeadStatus;
   notes: string | null;
   campaign_id: string | null;
+  score: number | null;
+  last_activity_at: string | null;
+  reply_intent: string | null;
 };
 
 type Campaign = { id: string; name: string };
@@ -99,8 +102,8 @@ const Leads = () => {
     const [{ data: cs }, leadsRes] = await Promise.all([
       supabase.from("campaigns").select("id,name").order("name"),
       campaignFilter
-        ? supabase.from("leads").select("*").eq("campaign_id", campaignFilter).order("created_at", { ascending: false })
-        : supabase.from("leads").select("*").order("created_at", { ascending: false }),
+        ? supabase.from("leads").select("*").eq("campaign_id", campaignFilter).order("score", { ascending: false }).order("created_at", { ascending: false })
+        : supabase.from("leads").select("*").order("score", { ascending: false }).order("created_at", { ascending: false }),
     ]);
     setCampaigns((cs as Campaign[]) ?? []);
     setLeads((leadsRes.data as Lead[]) ?? []);
