@@ -82,10 +82,10 @@ const Templates = () => {
   };
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Templates</h1>
+          <h1 className="text-xl font-semibold sm:text-2xl">Templates</h1>
           <p className="text-sm text-muted-foreground">Tone & style references the AI uses when drafting pitches.</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>

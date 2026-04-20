@@ -123,10 +123,10 @@ const Channels = () => {
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
 
   return (
-    <div className="container mx-auto max-w-5xl space-y-6 p-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="container mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Channels</h1>
+          <h1 className="text-xl font-semibold sm:text-2xl">Channels</h1>
           <p className="text-sm text-muted-foreground">
             Connect WhatsApp, X, Facebook and Instagram so campaigns can reach leads outside email.
           </p>
@@ -135,7 +135,7 @@ const Channels = () => {
           <DialogTrigger asChild>
             <Button><Plus className="h-4 w-4" /> Connect channel</Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
             <DialogHeader><DialogTitle>Connect a channel</DialogTitle></DialogHeader>
             <div className="space-y-4">
               <div className="space-y-1.5">
@@ -190,7 +190,7 @@ const Channels = () => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {accounts.map((a) => {
             const meta = CHANNEL_META[a.channel];
             const Icon = meta.icon;

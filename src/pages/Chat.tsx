@@ -79,13 +79,15 @@ const Chat = () => {
   };
 
   return (
-    <div className="container mx-auto flex h-[calc(100vh-3.5rem)] max-w-4xl flex-col p-4">
-      <div className="flex items-center justify-between pb-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-semibold">Studio Agent</h1>
+    <div className="container mx-auto flex h-[calc(100vh-3.5rem)] max-w-4xl flex-col p-3 sm:p-4">
+      <div className="flex items-center justify-between gap-2 pb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles className="h-5 w-5 shrink-0 text-primary" />
+          <h1 className="truncate text-lg font-semibold sm:text-xl">Studio Agent</h1>
         </div>
-        <Button variant="outline" size="sm" onClick={newConversation}><Plus className="h-4 w-4" /> New chat</Button>
+        <Button variant="outline" size="sm" onClick={newConversation}>
+          <Plus className="h-4 w-4" /> <span className="hidden sm:inline">New chat</span>
+        </Button>
       </div>
 
       <Card ref={scrollRef as any} className="flex-1 overflow-y-auto p-4">
