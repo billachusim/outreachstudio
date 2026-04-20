@@ -478,8 +478,8 @@ Notes: ${lead.notes ?? ""}`;
         .from("pitches").select("id", { count: "exact", head: true })
         .eq("user_id", run.user_id).gte("sent_at", startOfDay.toISOString());
 
-      if ((sentToday ?? 0) >= run.daily_send_cap) {
-        await logEvent("info", `Daily send cap reached (${sentToday}/${run.daily_send_cap}). Pausing for today.`);
+      if ((sentToday ?? 0) >= effectiveCap) {
+        await logEvent("info", `Daily ${channelKey} cap reached (${sentToday}/${effectiveCap}). Pausing for today.`);
         await updateRun({ state: "paused" as never, error: "Daily cap reached" });
         return json(200, { ok: true, paused: true });
       }
