@@ -1,0 +1,76 @@
+// Generate one daily_briefings row per user with metrics + AI-written summary.
+// Cron at 08:00 WAT. Idempotent per user/date.
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+
+const json = (s: number, p: unknown) =>
+  new Response(JSON.stringify(p), { status: s, headers: { "Content-Type": "application/json" } });
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null);
+  try {
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+
+    // All distinct users with any campaign
+    const { data: users } = await supabase.from("campaigns").select("user_id");
+    const userIds = Array.from(new Set((users ?? []).map((u: any) => u.user_id)));
+    const today = new Date().toISOString().slice(0, 10);
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    let made = 0;
+    for (const userId of userIds) {
+      // Skip if already exists for today
+      const { data: existing } = await supabase
+        .from("daily_briefings").select("id").eq("user_id", userId).eq("briefing_date", today).maybeSingle();
+      if (existing) continue;
+
+      const [pitchesRes, eventsRes, runsRes, warmRes] = await Promise.all([
+        supabase.from("pitches").select("id, sent_at").eq("user_id", userId).gte("sent_at", since),
+        supabase.from("pitch_events").select("event_type").eq("user_id", userId).gte("occurred_at", since),
+        supabase.from("campaign_runs").select("state, leads_sent").eq("user_id", userId).gte("updated_at", since),
+        supabase.from("leads").select("id, business_name, score, status").eq("user_id", userId).order("score", { ascending: false }).limit(5),
+      ]);
+
+      const sent = pitchesRes.data?.length ?? 0;
+      const opens = (eventsRes.data ?? []).filter((e: any) => e.event_type === "opened").length;
+      const replies = (eventsRes.data ?? []).filter((e: any) => e.event_type === "replied").length;
+      const bounces = (eventsRes.data ?? []).filter((e: any) => e.event_type === "bounced").length;
+      const activeRuns = (runsRes.data ?? []).filter((r: any) => !["done", "failed"].includes(r.state)).length;
+
+      const metrics = { sent, opens, replies, bounces, active_runs: activeRuns };
+
+      const ai = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-lite",
+          messages: [
+            { role: "system", content: "You are the morning briefing voice for an outreach studio. 4–6 short bullets, plain English, no fluff. Highlight wins, blockers, and what to do today. Mention warm leads if any." },
+            { role: "user", content: `Last 24h metrics: ${JSON.stringify(metrics)}\nTop leads by score: ${JSON.stringify(warmRes.data ?? [])}\nWrite the morning briefing.` },
+          ],
+        }),
+      });
+      let bodyMd = "";
+      if (ai.ok) {
+        const aj = await ai.json();
+        bodyMd = aj?.choices?.[0]?.message?.content ?? "";
+      }
+      if (!bodyMd) {
+        bodyMd = `**Morning brief**\n\n- Sent: ${sent}\n- Opens: ${opens}\n- Replies: ${replies}\n- Bounces: ${bounces}\n- Active runs: ${activeRuns}`;
+      }
+
+      await supabase.from("daily_briefings").insert({
+        user_id: userId, briefing_date: today, body: bodyMd, metrics,
+      });
+      made++;
+    }
+    return json(200, { ok: true, made });
+  } catch (e) {
+    console.error("daily-briefing", e);
+    return json(500, { error: e instanceof Error ? e.message : "error" });
+  }
+});
