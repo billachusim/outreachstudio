@@ -269,6 +269,7 @@ const Leads = () => {
                 <TableHead>Business</TableHead>
                 <TableHead>Contact</TableHead>
                 <TableHead>Website</TableHead>
+                <TableHead className="w-20">Score</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-24 text-right">Actions</TableHead>
               </TableRow>
