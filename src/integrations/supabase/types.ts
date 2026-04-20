@@ -103,49 +103,64 @@ export type Database = {
       }
       campaigns: {
         Row: {
+          auto_followup: boolean
           auto_send: boolean
           category: string | null
           channel: string
           city: string | null
           created_at: string
           discovery_source: string
+          email_cap: number
+          follow_up_days: number[]
           id: string
           keywords: string | null
           name: string
           offering_id: string | null
+          social_cap: number
           status: string
           updated_at: string
           user_id: string
+          whatsapp_cap: number
         }
         Insert: {
+          auto_followup?: boolean
           auto_send?: boolean
           category?: string | null
           channel?: string
           city?: string | null
           created_at?: string
           discovery_source?: string
+          email_cap?: number
+          follow_up_days?: number[]
           id?: string
           keywords?: string | null
           name: string
           offering_id?: string | null
+          social_cap?: number
           status?: string
           updated_at?: string
           user_id: string
+          whatsapp_cap?: number
         }
         Update: {
+          auto_followup?: boolean
           auto_send?: boolean
           category?: string | null
           channel?: string
           city?: string | null
           created_at?: string
           discovery_source?: string
+          email_cap?: number
+          follow_up_days?: number[]
           id?: string
           keywords?: string | null
           name?: string
           offering_id?: string | null
+          social_cap?: number
           status?: string
           updated_at?: string
           user_id?: string
+          whatsapp_cap?: number
         }
         Relationships: [
           {
@@ -329,6 +344,78 @@ export type Database = {
           },
         ]
       }
+      daily_briefings: {
+        Row: {
+          body: string
+          briefing_date: string
+          created_at: string
+          id: string
+          metrics: Json
+          read_at: string | null
+          user_id: string
+        }
+        Insert: {
+          body?: string
+          briefing_date: string
+          created_at?: string
+          id?: string
+          metrics?: Json
+          read_at?: string | null
+          user_id: string
+        }
+        Update: {
+          body?: string
+          briefing_date?: string
+          created_at?: string
+          id?: string
+          metrics?: Json
+          read_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      intel_items: {
+        Row: {
+          acted_on: boolean
+          created_at: string
+          id: string
+          posted_at: string | null
+          relevance_score: number | null
+          source: string
+          summary: string | null
+          tags: string[] | null
+          title: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          acted_on?: boolean
+          created_at?: string
+          id?: string
+          posted_at?: string | null
+          relevance_score?: number | null
+          source: string
+          summary?: string | null
+          tags?: string[] | null
+          title: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          acted_on?: boolean
+          created_at?: string
+          id?: string
+          posted_at?: string | null
+          relevance_score?: number | null
+          source?: string
+          summary?: string | null
+          tags?: string[] | null
+          title?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       leads: {
         Row: {
           address: string | null
@@ -338,8 +425,12 @@ export type Database = {
           contact_name: string | null
           created_at: string
           id: string
+          last_activity_at: string | null
           notes: string | null
           phone: string | null
+          reply_intent: string | null
+          root_domain: string | null
+          score: number
           status: Database["public"]["Enums"]["lead_status"]
           updated_at: string
           user_id: string
@@ -353,8 +444,12 @@ export type Database = {
           contact_name?: string | null
           created_at?: string
           id?: string
+          last_activity_at?: string | null
           notes?: string | null
           phone?: string | null
+          reply_intent?: string | null
+          root_domain?: string | null
+          score?: number
           status?: Database["public"]["Enums"]["lead_status"]
           updated_at?: string
           user_id: string
@@ -368,8 +463,12 @@ export type Database = {
           contact_name?: string | null
           created_at?: string
           id?: string
+          last_activity_at?: string | null
           notes?: string | null
           phone?: string | null
+          reply_intent?: string | null
+          root_domain?: string | null
+          score?: number
           status?: Database["public"]["Enums"]["lead_status"]
           updated_at?: string
           user_id?: string
@@ -431,6 +530,99 @@ export type Database = {
           target_audience?: string | null
           testimonial?: string | null
           title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      pitch_events: {
+        Row: {
+          channel: string
+          created_at: string
+          event_type: string
+          id: string
+          lead_id: string | null
+          occurred_at: string
+          payload: Json | null
+          pitch_id: string | null
+          provider: string
+          provider_message_id: string | null
+          recipient: string | null
+          user_id: string
+        }
+        Insert: {
+          channel?: string
+          created_at?: string
+          event_type: string
+          id?: string
+          lead_id?: string | null
+          occurred_at?: string
+          payload?: Json | null
+          pitch_id?: string | null
+          provider?: string
+          provider_message_id?: string | null
+          recipient?: string | null
+          user_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          lead_id?: string | null
+          occurred_at?: string
+          payload?: Json | null
+          pitch_id?: string | null
+          provider?: string
+          provider_message_id?: string | null
+          recipient?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      pitch_sequences: {
+        Row: {
+          campaign_id: string | null
+          created_at: string
+          id: string
+          lead_id: string
+          parent_pitch_id: string | null
+          pitch_id: string | null
+          reason: string | null
+          scheduled_at: string
+          sent_at: string | null
+          status: string
+          step: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id: string
+          parent_pitch_id?: string | null
+          pitch_id?: string | null
+          reason?: string | null
+          scheduled_at: string
+          sent_at?: string | null
+          status?: string
+          step: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string
+          parent_pitch_id?: string | null
+          pitch_id?: string | null
+          reason?: string | null
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string
+          step?: number
           updated_at?: string
           user_id?: string
         }
@@ -580,7 +772,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      compute_lead_score: { Args: { _lead_id: string }; Returns: number }
+      extract_root_domain: { Args: { url: string }; Returns: string }
     }
     Enums: {
       lead_status:
