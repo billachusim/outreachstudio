@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.daily-briefing]
 verify_jwt = false
+
+[functions.scan-intel]
+verify_jwt = false

@@ -16,6 +16,7 @@ import Inbox from "./pages/Inbox";
 import Chat from "./pages/Chat";
 import Memory from "./pages/Memory";
 import Channels from "./pages/Channels";
+import Intel from "./pages/Intel";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -45,6 +46,7 @@ const App = () => (
               <Route path="/chat" element={<Chat />} />
               <Route path="/memory" element={<Memory />} />
               <Route path="/channels" element={<Channels />} />
+              <Route path="/intel" element={<Intel />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
