@@ -97,11 +97,11 @@ const Memory = () => {
   }, {});
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold">
-            <Brain className="h-6 w-6" /> Agent Memory
+          <h1 className="flex items-center gap-2 text-xl font-semibold sm:text-2xl">
+            <Brain className="h-5 w-5 sm:h-6 sm:w-6" /> Agent Memory
           </h1>
           <p className="text-sm text-muted-foreground">
             The studio agent reads these markdown files at the start of every chat. Edit them to shape its identity, tone, knowledge, and playbook.
@@ -186,7 +186,7 @@ const Memory = () => {
           {KINDS.filter((k) => grouped[k]?.length).map((kind) => (
             <div key={kind} className="space-y-3">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{kind}</h2>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {grouped[kind].map((m) => (
                   <Card key={m.id} className="flex flex-col">
                     <CardHeader>

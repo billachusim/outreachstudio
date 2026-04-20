@@ -111,13 +111,13 @@ const Offerings = () => {
   };
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Offerings</h1>
+          <h1 className="text-xl font-semibold sm:text-2xl">Offerings</h1>
           <p className="text-sm text-muted-foreground">Your products, services and skills you pitch to leads.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             onClick={async () => {
@@ -187,7 +187,7 @@ const Offerings = () => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {offerings.map((o) => (
             <Card key={o.id} className="flex flex-col">
               <CardHeader>

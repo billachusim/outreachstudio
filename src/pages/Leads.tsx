@@ -154,13 +154,13 @@ const Leads = () => {
   };
 
   return (
-    <div className="container mx-auto max-w-7xl space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="container mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Leads</h1>
+          <h1 className="text-xl font-semibold sm:text-2xl">Leads</h1>
           <p className="text-sm text-muted-foreground">Manage prospects and move them through the pipeline.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <Select
             value={campaignFilter ?? "all"}
             onValueChange={(v) => {
@@ -168,7 +168,7 @@ const Leads = () => {
               else setParams({ campaign: v });
             }}
           >
-            <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="flex-1 sm:w-[200px] sm:flex-none"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All campaigns</SelectItem>
               {campaigns.map((c) => (
@@ -252,7 +252,7 @@ const Leads = () => {
           </CardContent>
         </Card>
       ) : (
-        <Card>
+        <Card className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

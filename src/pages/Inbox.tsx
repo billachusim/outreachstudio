@@ -43,9 +43,9 @@ const Inbox = () => {
   }, [user?.id]);
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-6 p-6">
+    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-2xl font-semibold">Inbox</h1>
+        <h1 className="text-xl font-semibold sm:text-2xl">Inbox</h1>
         <p className="text-sm text-muted-foreground">Pitches you've sent. Reply tracking comes next.</p>
       </div>
 
@@ -64,7 +64,7 @@ const Inbox = () => {
           </CardContent>
         </Card>
       ) : (
-        <Card>
+        <Card className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

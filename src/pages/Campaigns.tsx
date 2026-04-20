@@ -107,17 +107,17 @@ const Campaigns = () => {
   };
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-6 p-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Campaigns</h1>
+          <h1 className="text-xl font-semibold sm:text-2xl">Campaigns</h1>
           <p className="text-sm text-muted-foreground">Group leads by who you're targeting and which offering you're pitching.</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button><Plus className="h-4 w-4" /> New campaign</Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>New campaign</DialogTitle>
             </DialogHeader>
@@ -203,7 +203,7 @@ const Campaigns = () => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {campaigns.map((c) => {
             const offering = offerings.find((o) => o.id === c.offering_id);
             return (

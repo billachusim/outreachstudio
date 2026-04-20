@@ -131,7 +131,7 @@ export const BulkDraftBar = ({ selectedIds, onClear, onComplete }: Props) => {
   const ModeIcon = mode === "draft" ? Sparkles : mode === "enrich" ? Globe : Send;
 
   return (
-    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-md border bg-card p-3 shadow-sm">
+    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-md border bg-card p-3 shadow-sm sm:gap-3">
       <span className="text-sm font-medium">{selectedIds.length} selected</span>
 
       {!job.running && (
@@ -148,7 +148,7 @@ export const BulkDraftBar = ({ selectedIds, onClear, onComplete }: Props) => {
           {mode === "draft" && (
             <>
               <Select value={templateId ?? "none"} onValueChange={(v) => setTemplateId(v === "none" ? null : v)}>
-                <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Template" /></SelectTrigger>
+                <SelectTrigger className="h-9 w-full sm:w-[180px]"><SelectValue placeholder="Template" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No template</SelectItem>
                   {templates.map((t) => (
@@ -157,7 +157,7 @@ export const BulkDraftBar = ({ selectedIds, onClear, onComplete }: Props) => {
                 </SelectContent>
               </Select>
               <Select value={tone} onValueChange={setTone}>
-                <SelectTrigger className="h-9 w-[170px]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 w-full sm:w-[170px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {TONES.map((t) => (
                     <SelectItem key={t} value={t}>{t}</SelectItem>
