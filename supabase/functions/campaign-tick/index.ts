@@ -140,10 +140,16 @@ Deno.serve(async (req) => {
     // Load campaign
     const { data: campaign } = await supabase
       .from("campaigns")
-      .select("id, name, city, category, keywords, discovery_source")
+      .select("id, name, city, category, keywords, discovery_source, channel, email_cap, whatsapp_cap, social_cap, follow_up_days, auto_followup, offering_id")
       .eq("id", run.campaign_id)
       .maybeSingle();
     if (!campaign) return await fail("Campaign deleted");
+    const channelKey = (campaign as any).channel ?? "email";
+    const channelCap =
+      channelKey === "email" ? (campaign as any).email_cap :
+      channelKey === "whatsapp" ? (campaign as any).whatsapp_cap :
+      (campaign as any).social_cap;
+    const effectiveCap = Math.min(run.daily_send_cap, channelCap ?? run.daily_send_cap);
     const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? "";
 
     // STATE: queued -> discovering (just transition + log)
