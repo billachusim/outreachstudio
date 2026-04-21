@@ -236,9 +236,32 @@ const Dashboard = () => {
                       <Badge className={stateColors[r.state] ?? ""}>{r.state}</Badge>
                       {r.error && <span className="text-xs text-destructive">{r.error}</span>}
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => togglePause(r)}>
-                      {r.state === "paused" ? <><Play className="h-3.5 w-3.5" /> Resume</> : <><Pause className="h-3.5 w-3.5" /> Pause</>}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={() => togglePause(r)}>
+                        {r.state === "paused" ? <><Play className="h-3.5 w-3.5" /> Resume</> : <><Pause className="h-3.5 w-3.5" /> Pause</>}
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" title="End run">
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>End this run?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will stop <strong>{campaigns[r.campaign_id] ?? "the campaign"}</strong> immediately. No new leads will be discovered, drafted, or sent for this run. Already-sent pitches and follow-ups are unaffected. You can start a new run later from the Campaigns tab.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => endRun(r)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                              End run
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                   <Progress value={pct} className="h-2" />
                   <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-5">
