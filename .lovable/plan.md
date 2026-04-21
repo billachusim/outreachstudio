@@ -1,115 +1,106 @@
 
 
-# Fetch Leads — global, context-aware lead discovery (revised)
+# Squeeze individual leads out of list/blog/aggregator pages
 
-A new **`✨ Fetch leads`** button on the Leads page that runs one big AI-driven discovery sweep. Reads everything the system knows (memory, offerings, intel, campaigns, region) and pulls fresh raw leads from Firecrawl, biased to your region (Nigeria-first, Africa-wide).
+You're right — right now when Firecrawl search returns a page like *"Top 10 Universities in Nigeria"* on TechCabal, the system stores **TechCabal's article URL** as one lead and you end up drafting pitches to the blog instead of to the 10 universities the article actually mentions. We'll detect aggregator pages and **explode each one into the real businesses it lists**.
 
-## Efficiency-first limits (revised)
+## What changes
 
-Instead of a flat 100-lead cap, we optimize around **Firecrawl spend** — the actual cost driver. One Firecrawl search returns up to 20 results for a single credit, so **8 well-crafted queries ≈ 8 credits ≈ up to 160 raw candidates**. We keep what we find.
+A new step inserted between "Firecrawl search returns hits" and "insert leads":
+
+```
+Firecrawl hit
+   │
+   ├─► Looks like a real business homepage?  ──► insert as ONE lead (today's behaviour)
+   │
+   └─► Looks like a list / blog / directory? ──► EXPLODE
+                                                  │
+                                                  ├─ Scrape the article (markdown + links)
+                                                  ├─ AI extracts every business mentioned:
+                                                  │     [{name, website, why_listed}, …]
+                                                  ├─ Validate each website (resolve → root domain)
+                                                  └─ Insert each as its own raw lead
+                                                     (skip the aggregator URL itself)
+```
+
+## How we detect "this is a list/aggregator page"
+
+A hit is treated as an aggregator when **any** of these are true:
+- Host is on a known **publisher/listicle host** list (already in our blocklist as outright-skip — we'll move them to a new `LISTICLE_HOSTS` set instead): `techcabal.com`, `techpoint.africa`, `businessday.ng`, `medium.com`, `substack.com`, `forbes.com`, `inc.com`, `entrepreneur.com`, `clutch.co`, `goodfirms.co`, `g2.com`, `producthunt.com`, blog platforms, etc.
+- Title matches listicle patterns: `/^(top|best|leading|\d+\s+best|\d+\s+top)\b/i`, contains `"list of"`, `"directory"`, `"companies in"`, `"startups in"`, `"agencies in"`.
+- URL path contains `/blog/`, `/articles/`, `/news/`, `/posts/`, `/list/`, `/directory/`.
+
+If matched → explode. If not matched → insert as today.
+
+## Explosion step (new)
+
+For each aggregator hit (capped — see budget below):
+
+1. **Scrape** the page with Firecrawl (`markdown` + `links`, `onlyMainContent: true`) — 1 credit.
+2. **AI extract** with `gemini-2.5-flash` (single tool call, structured output):
+   ```json
+   {
+     "businesses": [
+       { "name": "University of Lagos", "website": "https://unilag.edu.ng", "snippet": "..." },
+       { "name": "Covenant University", "website": "https://covenantuniversity.edu.ng", "snippet": "..." }
+     ],
+     "is_listicle": true,
+     "list_topic": "Top universities in Nigeria"
+   }
+   ```
+   The model gets the scraped markdown + the page's outbound links list (so it can resolve names that lack inline URLs by matching against link anchor text).
+3. **Validate & filter** each extracted business:
+   - Must have a website (or resolvable name → we'll skip name-only hits to keep quality high).
+   - Run through existing `HOST_BLOCKLIST`, `isExcludedTld`, dedupe vs `existingDomains`.
+   - Drop entries where the website host equals the aggregator host (self-references).
+4. **Insert as raw leads** with notes `"Source: AI fetch — extracted from list "{list_topic}" on {aggregator_host}"`. Each gets the existing autoscore + queues for the enrichment burst.
+5. **Aggregator URL itself is NOT inserted** as a lead.
+
+## Cost & safety budget
+
+To keep this efficient (the user has been clear about Firecrawl spend):
 
 | Knob | Value | Why |
 |---|---|---|
-| AI-planned search queries | **6–10** (target 8) | Sweet spot for coverage without burning credits |
-| Firecrawl results per query | **20** (max) | Same cost as 5 results — no reason to ask for less |
-| Concurrent Firecrawl calls | **4** | Respects API rate limits, finishes in ~15s |
-| Hard ceiling on inserted leads | **200** | Safety net only — virtually never hit if queries are good |
-| Soft target | **~120 raw leads** | What 8 queries naturally yield after dedupe/blocklist |
-| Initial enrichment burst | **top 25 candidates** by signal strength | Surfaces 70–90 score leads same run; ~25 cheap scrapes |
-| Stop conditions (any one ends the run) | • Hit 200 inserted<br>• All planned queries done<br>• User clicks Stop<br>• Firecrawl returns 402 (out of credits) | Whichever comes first |
+| Aggregator hits exploded per run | **max 8** | Each costs 1 scrape + 1 cheap AI call ≈ ~8 extra credits per run |
+| Businesses extracted per aggregator | **max 15** | Listicles are usually 5–25 items; cap protects against runaway results |
+| Aggregator scrape concurrency | **3** | Mirrors search concurrency, finishes fast |
+| Selection rule | First 8 aggregator-classified hits in arrival order, **prioritising hits whose title contains region keywords** | Most relevant first |
+| Skip explosion when | Total inserted already ≥ `hardCeiling - 20` | Don't burn credits if ceiling is near |
 
-**Net cost per Fetch run:** ~8 search credits + up to 25 scrape credits ≈ **~33 Firecrawl credits**. Plus 1 cheap `gemini-2.5-flash` planning call + up to 25 `gemini-2.5-flash-lite` contact-name calls.
+**Net added cost per Fetch run:** up to **~8 scrape credits + 8 cheap AI calls** ≈ negligible. In exchange you get potentially **40–120 real business leads** instead of 8 blog URLs.
 
-**Why this is more efficient than "cap at 100":** Capping inserts means we waste already-paid-for search results. Capping queries instead means we cap *spend*, and keep every lead the spend produced.
+## Visible changes for you
 
-## What you'll see
-
-**Leads page** — next to Import CSV / Add lead:
-
-```
-[ ✨ Fetch leads ]                     ← idle
-[ ⏳ Fetching… 87 found · 19 hot ]      ← live, click for details
-```
-
-Click while running → popover with:
-- Progress bar (queries done / planned)
-- Live counters: queries run, candidates seen, inserted, high-quality (≥50)
-- Current search query being executed
-- `Stop` button (graceful — finishes current query then exits)
-
-Newly inserted leads stream into the **Raw** tab as they land (Realtime).
-
-**Studio dashboard** — a new **"Lead fetch run"** card above Active runs, only when a run is in-flight or finished within last 24h. Same counters + "View raw leads →" link. Done state shows: *"Fetched 134 raw leads (28 high-quality) · 8 queries · ~33 credits"*.
-
-## How it works (one click → a lot happens)
-
-1. **Gather context** server-side:
-   - `profiles.outreach_region` + `outreach_country_code` (Nigeria / ng)
-   - All `agent_memories` (slug + title + content snippet)
-   - All `offerings` (title, target_audience, problem_solved, ideal_customer, trigger_keywords)
-   - Recent high-relevance `intel_items` (last 30d, score ≥40 — title + tags)
-   - All `campaigns` (name, category, keywords, city)
-
-2. **AI plans the search** (one `gemini-2.5-flash` call):
-   Returns a structured JSON of **6–10 queries** + ICP labels (e.g. *"boutique hotels in Lagos"*, *"fintech startups Nigeria"*, *"D2C fashion West Africa"*). Each query goes through `buildRegionalQuery` + `firecrawlLocationParam`. For Nigeria-region: 60% Nigeria-specific, 30% other African countries (GH/KE/ZA/EG), 10% diaspora.
-
-3. **Run Firecrawl searches in parallel** — 4 concurrent, 20 results each. Background loop keeps going until all queries done or hard ceiling (200) hit.
-
-4. **Filter + dedupe** as results arrive:
-   - Drop blocklisted hosts (`HOST_BLOCKLIST`)
-   - Drop `.edu`/`.gov`/non-target country TLDs once we have plenty of local
-   - Drop existing leads (any campaign or raw) by root domain
-   - Stop inserting at 200 (safety net)
-
-5. **Insert as raw leads** (`campaign_id: null`) with notes snippet. Auto-score trigger fires per insert.
-
-6. **Enrichment burst** — top **25 candidates** by initial signal strength (long description, clear business name, target-region TLD) get a single `enrich-lead` call each. This finds emails/phones/socials and pushes those leads to 70–90 scores.
-
-## Real-time progress
-
-New table `lead_fetch_runs`:
-
-```sql
-create table public.lead_fetch_runs (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  state text not null default 'planning',          -- planning | searching | enriching | done | failed | stopped
-  hard_ceiling int not null default 200,
-  queries_planned int not null default 0,
-  queries_run int not null default 0,
-  candidates_seen int not null default 0,
-  inserted_count int not null default 0,
-  high_quality_count int not null default 0,       -- score ≥50
-  enriched_count int not null default 0,
-  current_query text,
-  credits_estimate int not null default 0,
-  error text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
--- RLS: own rows only, enabled on supabase_realtime publication
-```
-
-Frontend subscribes via Realtime — no polling.
+- **Lead notes** now show provenance: *"Source: AI fetch — extracted from list 'Top fintech startups Nigeria' on techcabal.com (2024-03)"*. So you can always trace back where a lead came from.
+- **Progress panel** gets one more counter: `Exploded N list pages → M businesses` so you can see the multiplier in action.
+- **Run summary** ("Why zero leads?" card) now also shows: `Aggregators exploded: 6 · Businesses extracted: 47 · Inserted after dedupe: 31`.
+- **`lead_fetch_runs` schema:** add two columns `aggregators_exploded int` and `extracted_businesses int` (additive, defaulted to 0).
 
 ## Files to change
 
 **Backend**
-- New edge function `supabase/functions/fetch-leads/index.ts` — context gather → AI plan → Firecrawl loop → insert → enrichment burst → updates `lead_fetch_runs`. Returns immediately after creating the run row; uses `EdgeRuntime.waitUntil` to keep work going in background. Checks `state='stopped'` between queries for graceful cancellation. Catches Firecrawl 402 → state=`failed`, error=`"Firecrawl credits exhausted"`.
-- Edit `supabase/functions/_shared/enrichment.ts` — add `buildAfricanRegionalQuery(baseQuery, region)` that, for `ng/ke/gh/za/eg`, expands to multi-country bias.
-- New migration: `lead_fetch_runs` table + RLS + add to realtime publication.
+- Edit `supabase/functions/fetch-leads/index.ts`:
+  - Add `LISTICLE_HOSTS` set + `looksLikeAggregator(hit)` classifier.
+  - Split `processBatch`: classify each hit → bucket as `directLeads[]` or `aggregatorHits[]`. Insert direct leads as today; pass aggregators to a new `explodeAggregators()` helper.
+  - New `explodeAggregators(hits, ...)`: scrape (concurrency 3) → AI extract (one call per page) → validate → bulk insert child leads. Tracks `aggregators_exploded` + `extracted_businesses`.
+  - Update credits estimate to include scrape + AI calls.
+  - Update the failure-reason composer to mention extraction stats when zero leads.
 
 **Frontend**
-- Edit `src/pages/Leads.tsx` — `Fetch leads` button + live progress popover, Realtime subscription on active `lead_fetch_runs` row, auto-refresh leads on insert events, `Stop` button.
-- New `src/components/FetchLeadsProgress.tsx` — progress UI, reused on Leads page and Dashboard.
-- Edit `src/pages/Dashboard.tsx` — render `FetchLeadsProgress` card above "Active runs" when an in-flight or recent (last 24h) `lead_fetch_runs` row exists.
+- Edit `src/components/FetchLeadsProgress.tsx`:
+  - Show new counters in live progress: *"Exploded 6 list pages → 47 businesses"*.
+  - Show in post-run summary card.
 
-## Cost & safety
+**Migration**
+- New migration: `ALTER TABLE lead_fetch_runs ADD COLUMN aggregators_exploded int NOT NULL DEFAULT 0, ADD COLUMN extracted_businesses int NOT NULL DEFAULT 0;`
+- Regenerate `src/integrations/supabase/types.ts` (auto-handled).
 
-- **Firecrawl per Fetch run:** ~33 credits (8 searches + 25 scrapes).
-- **AI per Fetch run:** 1 cheap planning call + ≤25 micro contact-name calls. Negligible.
-- **Hard safety ceiling:** 200 inserted leads. In practice almost never reached after dedupe — natural ceiling is ~120–140.
-- **402 handling:** if Firecrawl returns "out of credits", the run halts, state=`failed`, the popover shows a clear "Firecrawl credits exhausted — top up to continue" message.
-- **Concurrency guard:** only one in-flight `lead_fetch_runs` per user; button disabled while `state ∈ {planning, searching, enriching}`.
-- **Stop button:** sets `state='stopped'`; loop checks before each query batch and exits gracefully (already-inserted leads stay).
+## Edge cases handled
+
+- **AI returns junk websites** (e.g. `example.com`, broken URLs) → URL parsing + TLD/blocklist filter drops them silently.
+- **Listicle is paywalled / scrape fails** → log, skip that aggregator, continue with the rest. Doesn't fail the run.
+- **Same business appears in multiple lists** → existing `existingDomains` dedupe catches it; only first occurrence inserted.
+- **Aggregator host is in the strict outright-block list today** (e.g. `medium.com`) — we'll move *blog/listicle hosts that we want to mine but not pitch to* into `LISTICLE_HOSTS` (allow scrape, never insert as lead). The hard blocklist (`facebook.com`, `google.com`, etc.) stays as today.
+- **Hard ceiling still respected** — explosion stops inserting once `hardCeiling` is reached.
 
