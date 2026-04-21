@@ -57,7 +57,12 @@ function normalizeArticles(scrape: any, source: string, baseUrl: string): Articl
       title: String(it.title).trim().slice(0, 300),
       url: abs,
       summary: it.summary ? String(it.summary).slice(0, 600) : undefined,
-      published_at: it.published_at ?? undefined,
+      published_at: (() => {
+        const v = it.published_at;
+        if (!v || typeof v !== "string" || v.trim() === "") return undefined;
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? undefined : d.toISOString();
+      })(),
       source,
     });
   }
