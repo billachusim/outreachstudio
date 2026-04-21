@@ -1,106 +1,117 @@
 
 
-# Squeeze individual leads out of list/blog/aggregator pages
+# Discover & auto-promote intel sources
 
-You're right — right now when Firecrawl search returns a page like *"Top 10 Universities in Nigeria"* on TechCabal, the system stores **TechCabal's article URL** as one lead and you end up drafting pitches to the blog instead of to the 10 universities the article actually mentions. We'll detect aggregator pages and **explode each one into the real businesses it lists**.
+Two related upgrades to Intel sources, both about turning your real lead-discovery activity into a self-growing list of news/listicle sources.
 
-## What changes
+## Part 1 — "Discover sources" button (manual, AI-powered)
 
-A new step inserted between "Firecrawl search returns hits" and "insert leads":
+A new button on **Intel → Sources** that asks the AI: *"given everything this user knows and targets, what news sites, blogs, and directories would be richest sources of triggers and lead lists?"* Then it validates each suggestion with Firecrawl and shows them as clickable cards you can add with one click.
+
+**Where:** `src/pages/IntelSources.tsx` — new card *"Discover new sources"* between "Add a custom source" and "Your sources":
 
 ```
-Firecrawl hit
-   │
-   ├─► Looks like a real business homepage?  ──► insert as ONE lead (today's behaviour)
-   │
-   └─► Looks like a list / blog / directory? ──► EXPLODE
-                                                  │
-                                                  ├─ Scrape the article (markdown + links)
-                                                  ├─ AI extracts every business mentioned:
-                                                  │     [{name, website, why_listed}, …]
-                                                  ├─ Validate each website (resolve → root domain)
-                                                  └─ Insert each as its own raw lead
-                                                     (skip the aggregator URL itself)
+┌─ Discover new sources ───────────────────────────────────┐
+│ Find news sites, blogs and directories that match your    │
+│ offerings and region.                  [ ✨ Discover ]    │
+│                                                            │
+│ ▸ Disrupt Africa  https://disrupt-africa.com/             │
+│   Pan-African startup news — matches your fintech ICP     │
+│                                            [ + Add ]      │
+│ ▸ Ventures Africa  https://venturesafrica.com/             │
+│   ...                                       [ + Add ]      │
+└────────────────────────────────────────────────────────────┘
 ```
 
-## How we detect "this is a list/aggregator page"
+**Backend** — new edge function `supabase/functions/discover-intel-sources/index.ts`:
 
-A hit is treated as an aggregator when **any** of these are true:
-- Host is on a known **publisher/listicle host** list (already in our blocklist as outright-skip — we'll move them to a new `LISTICLE_HOSTS` set instead): `techcabal.com`, `techpoint.africa`, `businessday.ng`, `medium.com`, `substack.com`, `forbes.com`, `inc.com`, `entrepreneur.com`, `clutch.co`, `goodfirms.co`, `g2.com`, `producthunt.com`, blog platforms, etc.
-- Title matches listicle patterns: `/^(top|best|leading|\d+\s+best|\d+\s+top)\b/i`, contains `"list of"`, `"directory"`, `"companies in"`, `"startups in"`, `"agencies in"`.
-- URL path contains `/blog/`, `/articles/`, `/news/`, `/posts/`, `/list/`, `/directory/`.
+1. Gather context (same shape as `fetch-leads` planner): `profiles.outreach_region`, `offerings` (titles, audiences, keywords), `agent_memories`, `campaigns` (categories), and existing `intel_sources` + the built-in `DEFAULT_SOURCES` so we don't suggest dupes.
+2. **One AI call** (`gemini-2.5-flash`, structured tool call) — returns 5–8 candidates: `{name, url, why_relevant, type: "news"|"blog"|"directory"|"listicle"}`.
+3. **Validate each candidate** — parallel Firecrawl `/v2/map?limit=5` calls (5 cheap credits total). Drops any URL that fails to map. Filters out anything already in user's sources or `DEFAULT_SOURCES`.
+4. Returns `{ suggestions: [...] }` to the frontend (does not insert — user decides).
 
-If matched → explode. If not matched → insert as today.
+Frontend then offers a one-click `+ Add` per suggestion that inserts into `intel_sources` exactly like the existing manual form. A `Refresh` button re-runs discovery to get a different batch.
 
-## Explosion step (new)
+**Cost per click:** 1 cheap AI call + up to 8 Firecrawl `/map` calls (≈ 8 credits) — runs once on demand, not on a schedule.
 
-For each aggregator hit (capped — see budget below):
+## Part 2 — Auto-promote aggregators that produce quality leads
 
-1. **Scrape** the page with Firecrawl (`markdown` + `links`, `onlyMainContent: true`) — 1 credit.
-2. **AI extract** with `gemini-2.5-flash` (single tool call, structured output):
-   ```json
-   {
-     "businesses": [
-       { "name": "University of Lagos", "website": "https://unilag.edu.ng", "snippet": "..." },
-       { "name": "Covenant University", "website": "https://covenantuniversity.edu.ng", "snippet": "..." }
-     ],
-     "is_listicle": true,
-     "list_topic": "Top universities in Nigeria"
-   }
-   ```
-   The model gets the scraped markdown + the page's outbound links list (so it can resolve names that lack inline URLs by matching against link anchor text).
-3. **Validate & filter** each extracted business:
-   - Must have a website (or resolvable name → we'll skip name-only hits to keep quality high).
-   - Run through existing `HOST_BLOCKLIST`, `isExcludedTld`, dedupe vs `existingDomains`.
-   - Drop entries where the website host equals the aggregator host (self-references).
-4. **Insert as raw leads** with notes `"Source: AI fetch — extracted from list "{list_topic}" on {aggregator_host}"`. Each gets the existing autoscore + queues for the enrichment burst.
-5. **Aggregator URL itself is NOT inserted** as a lead.
+When `fetch-leads` explodes a listicle/aggregator and that listicle yields **≥3 leads that end up scoring ≥50** (after the enrichment burst), we auto-add the aggregator's host to `intel_sources` so the next nightly `scan-intel` keeps mining it.
 
-## Cost & safety budget
+### How we track it
 
-To keep this efficient (the user has been clear about Firecrawl spend):
+New table `aggregator_performance`:
 
-| Knob | Value | Why |
-|---|---|---|
-| Aggregator hits exploded per run | **max 8** | Each costs 1 scrape + 1 cheap AI call ≈ ~8 extra credits per run |
-| Businesses extracted per aggregator | **max 15** | Listicles are usually 5–25 items; cap protects against runaway results |
-| Aggregator scrape concurrency | **3** | Mirrors search concurrency, finishes fast |
-| Selection rule | First 8 aggregator-classified hits in arrival order, **prioritising hits whose title contains region keywords** | Most relevant first |
-| Skip explosion when | Total inserted already ≥ `hardCeiling - 20` | Don't burn credits if ceiling is near |
+```sql
+create table public.aggregator_performance (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  host text not null,              -- e.g. "techcabal.com"
+  source_url text not null,        -- last seen aggregator page URL (for naming)
+  total_extracted int not null default 0,    -- businesses pulled from this host
+  total_high_quality int not null default 0, -- of those, how many scored >=50
+  promoted_to_intel bool not null default false,
+  promoted_at timestamptz,
+  last_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  unique (user_id, host)
+);
+-- RLS: own rows only.
+```
 
-**Net added cost per Fetch run:** up to **~8 scrape credits + 8 cheap AI calls** ≈ negligible. In exchange you get potentially **40–120 real business leads** instead of 8 blog URLs.
+### Wiring inside `fetch-leads/index.ts`
 
-## Visible changes for you
+In the `explodeAggregators()` helper (after children inserted), upsert a row keyed on `(user_id, host)`:
+- `total_extracted` += businesses extracted from this host this run
+- `total_high_quality` += inserted leads scoring ≥50 from this host this run
+- `last_seen_at = now()`, `source_url = agg.hit.url`
 
-- **Lead notes** now show provenance: *"Source: AI fetch — extracted from list 'Top fintech startups Nigeria' on techcabal.com (2024-03)"*. So you can always trace back where a lead came from.
-- **Progress panel** gets one more counter: `Exploded N list pages → M businesses` so you can see the multiplier in action.
-- **Run summary** ("Why zero leads?" card) now also shows: `Aggregators exploded: 6 · Businesses extracted: 47 · Inserted after dedupe: 31`.
-- **`lead_fetch_runs` schema:** add two columns `aggregators_exploded int` and `extracted_businesses int` (additive, defaulted to 0).
+**Then immediately after the enrichment burst** (so scores are settled), one pass:
+
+```sql
+-- pseudo
+for each row in aggregator_performance
+  where user_id = $1 and not promoted_to_intel
+    and total_high_quality >= 3
+    and host not in (DEFAULT_SOURCES) and host not in (existing intel_sources):
+  insert into intel_sources (user_id, name, url, enabled) values
+    ($1, <Title-cased host>, 'https://<host>/', true);
+  update aggregator_performance set promoted_to_intel = true, promoted_at = now() where id = $row;
+  log event "Auto-added intel source: <host> (3+ quality leads from listicles)"
+```
+
+### What the user sees
+
+- A new line in the fetch-leads run summary card: *"Promoted 2 new intel sources: techcabal.com, disrupt-africa.com"* (when applicable).
+- The new sources appear automatically in **Intel → Sources** under "Your sources" with a small `Auto-promoted` badge so you know how they got there.
+- A toast on the Leads page when a run finishes if any promotions happened: *"2 new intel sources auto-added — view"* (link to `/intel/sources`).
+
+## Schema changes
+
+1. New migration: `aggregator_performance` table + RLS (own rows: select/insert/update/delete) + unique index `(user_id, host)`.
+2. Add column to `intel_sources`: `auto_promoted bool not null default false` so the UI can show the badge.
 
 ## Files to change
 
 **Backend**
-- Edit `supabase/functions/fetch-leads/index.ts`:
-  - Add `LISTICLE_HOSTS` set + `looksLikeAggregator(hit)` classifier.
-  - Split `processBatch`: classify each hit → bucket as `directLeads[]` or `aggregatorHits[]`. Insert direct leads as today; pass aggregators to a new `explodeAggregators()` helper.
-  - New `explodeAggregators(hits, ...)`: scrape (concurrency 3) → AI extract (one call per page) → validate → bulk insert child leads. Tracks `aggregators_exploded` + `extracted_businesses`.
-  - Update credits estimate to include scrape + AI calls.
-  - Update the failure-reason composer to mention extraction stats when zero leads.
+- New: `supabase/functions/discover-intel-sources/index.ts` (AI + Firecrawl map validation).
+- Edit: `supabase/functions/fetch-leads/index.ts` — track per-host stats during explosion, run promotion check after enrichment, include promoted hosts count in final `update({...})` so frontend sees them.
+- Edit: `src/integrations/supabase/types.ts` (auto-regenerated after migration).
 
 **Frontend**
-- Edit `src/components/FetchLeadsProgress.tsx`:
-  - Show new counters in live progress: *"Exploded 6 list pages → 47 businesses"*.
-  - Show in post-run summary card.
+- Edit: `src/pages/IntelSources.tsx` — add "Discover new sources" card, suggestion list with `+ Add` buttons, `Auto-promoted` badge in user sources list.
+- Edit: `src/components/FetchLeadsProgress.tsx` — read a new `promoted_sources_count` field from the run row (added to migration) and render it in the post-run summary as *"Promoted N source(s) to Intel."* Also surface a toast → link.
 
 **Migration**
-- New migration: `ALTER TABLE lead_fetch_runs ADD COLUMN aggregators_exploded int NOT NULL DEFAULT 0, ADD COLUMN extracted_businesses int NOT NULL DEFAULT 0;`
-- Regenerate `src/integrations/supabase/types.ts` (auto-handled).
+- `aggregator_performance` table.
+- `intel_sources.auto_promoted` boolean.
+- `lead_fetch_runs.promoted_sources_count int default 0` for surfacing in the run summary.
 
-## Edge cases handled
+## Cost & safety
 
-- **AI returns junk websites** (e.g. `example.com`, broken URLs) → URL parsing + TLD/blocklist filter drops them silently.
-- **Listicle is paywalled / scrape fails** → log, skip that aggregator, continue with the rest. Doesn't fail the run.
-- **Same business appears in multiple lists** → existing `existingDomains` dedupe catches it; only first occurrence inserted.
-- **Aggregator host is in the strict outright-block list today** (e.g. `medium.com`) — we'll move *blog/listicle hosts that we want to mine but not pitch to* into `LISTICLE_HOSTS` (allow scrape, never insert as lead). The hard blocklist (`facebook.com`, `google.com`, etc.) stays as today.
-- **Hard ceiling still respected** — explosion stops inserting once `hardCeiling` is reached.
+- Discover button: ≤9 credits per click (1 AI + 8 map calls), user-initiated only.
+- Auto-promotion: zero extra cost — piggy-backs on the existing fetch-leads run. Only adds 1 small SQL query at the end of each run.
+- Promotion threshold (3+ quality leads from one host) prevents one-off accidental promotions.
+- Hard guard: never promote hosts in `HOST_BLOCKLIST` (social/search/marketplaces) even if they somehow appear.
+- All promoted sources start `enabled = true` but the user can toggle them off in the existing Sources UI.
 
