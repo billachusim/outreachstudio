@@ -502,6 +502,10 @@ async function runFetch(
     const aggregatorQueue: AggregatorHit[] = [];
     const seenAggregatorUrls = new Set<string>();
 
+    // Per-host stats accumulated across the run for auto-promotion check.
+    // host → { extracted: businesses pulled this run, insertedLeadIds: ids inserted this run, sourceUrl }
+    const hostStats = new Map<string, { extracted: number; insertedLeadIds: string[]; sourceUrl: string }>();
+
     const processBatch = async (batch: PlannedQuery[]): Promise<{ outOfCredits: boolean; batchInserted: number }> => {
       await update({ current_query: batch[0].icp });
 
