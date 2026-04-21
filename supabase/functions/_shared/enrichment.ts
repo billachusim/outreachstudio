@@ -231,6 +231,17 @@ export function buildAfricanRegionalQuery(baseQuery: string, region: RegionConte
   return `${baseQuery} (${countryClause} OR ${tldClause})`;
 }
 
-export function firecrawlLocationParam(region: RegionContext) {
+// For /v2/scrape — accepts an object with country code + languages.
+export function firecrawlScrapeLocation(region: RegionContext) {
   return { country: region.countryCode.toUpperCase(), languages: ["en"] };
+}
+
+// For /v2/search — must be a STRING (country name like "Nigeria"), not an object.
+export function firecrawlSearchLocation(region: RegionContext): string {
+  return region.region || "Nigeria";
+}
+
+// Backward-compat alias — old callers used this for search; now returns the string form.
+export function firecrawlLocationParam(region: RegionContext): string {
+  return firecrawlSearchLocation(region);
 }
