@@ -29,6 +29,7 @@ export type FetchRun = {
   credits_estimate: number;
   aggregators_exploded: number;
   extracted_businesses: number;
+  promoted_sources_count: number;
   error: string | null;
   failure_reason: string | null;
   created_at: string;
