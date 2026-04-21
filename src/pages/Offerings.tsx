@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Pencil, Plus, RefreshCw, Trash2, Rocket } from "lucide-react";
@@ -33,6 +34,8 @@ type Offering = {
   testimonial: string | null;
   ideal_customer: string | null;
   status: string;
+  trigger_keywords?: string[] | null;
+  auto_lead_from_intel?: boolean | null;
 };
 
 const empty: Partial<Offering> = {
@@ -44,6 +47,8 @@ const empty: Partial<Offering> = {
   demo_url: "",
   testimonial: "",
   ideal_customer: "",
+  trigger_keywords: [],
+  auto_lead_from_intel: false,
 };
 
 const Offerings = () => {
@@ -168,6 +173,23 @@ const Offerings = () => {
               <Field label="Testimonial">
                 <Textarea rows={2} value={draft.testimonial ?? ""} onChange={(e) => setDraft({ ...draft, testimonial: e.target.value })} />
               </Field>
+              <Field label="Intel trigger keywords (comma-separated)">
+                <Input
+                  value={(draft.trigger_keywords ?? []).join(", ")}
+                  onChange={(e) => setDraft({ ...draft, trigger_keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                  placeholder="funding, launch, hiring, expansion"
+                />
+              </Field>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="text-sm font-medium">Auto-create leads from high-relevance intel</p>
+                  <p className="text-xs text-muted-foreground">When a story scores ≥ 80, scrape the article and create a lead automatically.</p>
+                </div>
+                <Switch
+                  checked={!!draft.auto_lead_from_intel}
+                  onCheckedChange={(v) => setDraft({ ...draft, auto_lead_from_intel: v })}
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
