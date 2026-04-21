@@ -27,6 +27,8 @@ export type FetchRun = {
   enriched_count: number;
   current_query: string | null;
   credits_estimate: number;
+  aggregators_exploded: number;
+  extracted_businesses: number;
   error: string | null;
   failure_reason: string | null;
   created_at: string;
