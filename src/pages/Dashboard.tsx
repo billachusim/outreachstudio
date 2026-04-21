@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Pause, Play, Activity, Send, Sparkles, Sun, RefreshCw, Eye, MailOpen, Reply, AlertTriangle, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { TopTriggersWidget } from "@/components/TopTriggersWidget";
+import { FetchLeadsProgress } from "@/components/FetchLeadsProgress";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -213,6 +214,8 @@ const Dashboard = () => {
           </div>
         </CardContent>
       </Card>
+
+      <FetchLeadsProgress variant="card" />
 
       <Card>
         <CardHeader>
