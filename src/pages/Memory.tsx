@@ -46,6 +46,40 @@ const Memory = () => {
   const [search, setSearch] = useState("");
   const [generating, setGenerating] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [region, setRegion] = useState("Nigeria");
+  const [countryCode, setCountryCode] = useState("ng");
+  const [savingRegion, setSavingRegion] = useState(false);
+
+  const loadRegion = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("profiles")
+      .select("outreach_region, outreach_country_code")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (data) {
+      setRegion((data as any).outreach_region || "Nigeria");
+      setCountryCode((data as any).outreach_country_code || "ng");
+    }
+  };
+
+  const saveRegion = async () => {
+    if (!user) return;
+    setSavingRegion(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        outreach_region: region.trim() || "Nigeria",
+        outreach_country_code: (countryCode.trim() || "ng").toLowerCase(),
+      } as never)
+      .eq("user_id", user.id);
+    setSavingRegion(false);
+    if (error) toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    else toast({ title: "Outreach region saved", description: `New campaigns will target ${region}.` });
+  };
+
+  useEffect(() => { loadRegion(); }, [user?.id]);
+
 
   useEffect(() => {
     document.title = "Memory · Outreach Studio";
@@ -263,6 +297,40 @@ const Memory = () => {
           className="pl-9"
         />
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Globe2 className="h-4 w-4" /> Outreach region
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Lead discovery (campaigns, intel auto-launches) is biased toward this region.
+            Defaults to Nigeria.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Region name</Label>
+              <Input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="Nigeria" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Country code</Label>
+              <Input
+                value={countryCode}
+                onChange={(e) => setCountryCode(e.target.value.toLowerCase().slice(0, 2))}
+                placeholder="ng"
+                maxLength={2}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={saveRegion} disabled={savingRegion} className="w-full sm:w-auto">
+                {savingRegion ? "Saving…" : "Save region"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
