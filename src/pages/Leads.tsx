@@ -63,12 +63,14 @@ const Leads = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [region, setRegion] = useState("Nigeria");
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Partial<LeadDetail>>({ business_name: "", status: "new" });
+  const [importOpen, setImportOpen] = useState(false);
+  const [draft, setDraft] = useState<Partial<LeadDetail>>({ business_name: "", status: "new", campaign_id: null });
   const [pitchLead, setPitchLead] = useState<LeadDetail | null>(null);
   const [pitchOpen, setPitchOpen] = useState(false);
   const [detailLead, setDetailLead] = useState<LeadDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [assignTarget, setAssignTarget] = useState<string>("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [minScore, setMinScore] = useState<number>(0);
@@ -86,11 +88,12 @@ const Leads = () => {
 
   const load = async () => {
     if (!user) return;
+    let leadsQuery = supabase.from("leads").select("*");
+    if (campaignFilter === RAW_VALUE) leadsQuery = leadsQuery.is("campaign_id", null);
+    else if (campaignFilter) leadsQuery = leadsQuery.eq("campaign_id", campaignFilter);
     const [{ data: cs }, leadsRes, { data: prof }] = await Promise.all([
       supabase.from("campaigns").select("id,name").order("name"),
-      campaignFilter
-        ? supabase.from("leads").select("*").eq("campaign_id", campaignFilter).order("score", { ascending: false }).order("created_at", { ascending: false })
-        : supabase.from("leads").select("*").order("score", { ascending: false }).order("created_at", { ascending: false }),
+      leadsQuery.order("score", { ascending: false }).order("created_at", { ascending: false }),
       supabase.from("profiles").select("outreach_region").eq("user_id", user.id).maybeSingle(),
     ]);
     setCampaigns((cs as Campaign[]) ?? []);
@@ -105,7 +108,8 @@ const Leads = () => {
     const hot = leads.filter((l) => (l.score ?? 0) >= 70).length;
     const ready = leads.filter((l) => l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status)).length;
     const needs = leads.filter((l) => !l.contact_email && !l.phone).length;
-    return { total, hot, ready, needs };
+    const raw = leads.filter((l) => !l.campaign_id).length;
+    return { total, hot, ready, needs, raw };
   }, [leads]);
 
   const filtered = useMemo(() => {
