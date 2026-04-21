@@ -27,6 +27,8 @@ export type FetchRun = {
   enriched_count: number;
   current_query: string | null;
   credits_estimate: number;
+  aggregators_exploded: number;
+  extracted_businesses: number;
   error: string | null;
   failure_reason: string | null;
   created_at: string;
@@ -265,6 +267,11 @@ const ProgressDetail = ({ run, pct, onStop, hideStop }: { run: FetchRun; pct: nu
               <span className="font-medium text-foreground">Now:</span> {run.current_query}
             </p>
           )}
+          {run.aggregators_exploded > 0 && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Mining lists:</span> exploded {run.aggregators_exploded} page{run.aggregators_exploded === 1 ? "" : "s"} → {run.extracted_businesses} business{run.extracted_businesses === 1 ? "" : "es"}
+            </p>
+          )}
         </>
       )}
       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -296,6 +303,8 @@ const ProgressDetail = ({ run, pct, onStop, hideStop }: { run: FetchRun; pct: nu
             <SummaryRow label="Total candidates" value={run.candidates_seen} />
             <SummaryRow label="Inserted leads" value={run.inserted_count} />
             <SummaryRow label="High-quality" value={run.high_quality_count} />
+            <SummaryRow label="Lists mined" value={run.aggregators_exploded} />
+            <SummaryRow label="Businesses extracted" value={run.extracted_businesses} />
             <SummaryRow label="Credits used" value={`~${run.credits_estimate}`} />
           </div>
           {run.inserted_count === 0 && run.failure_reason && (

@@ -460,12 +460,14 @@ export type Database = {
       }
       lead_fetch_runs: {
         Row: {
+          aggregators_exploded: number
           candidates_seen: number
           created_at: string
           credits_estimate: number
           current_query: string | null
           enriched_count: number
           error: string | null
+          extracted_businesses: number
           failure_reason: string | null
           hard_ceiling: number
           high_quality_count: number
@@ -482,12 +484,14 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          aggregators_exploded?: number
           candidates_seen?: number
           created_at?: string
           credits_estimate?: number
           current_query?: string | null
           enriched_count?: number
           error?: string | null
+          extracted_businesses?: number
           failure_reason?: string | null
           hard_ceiling?: number
           high_quality_count?: number
@@ -504,12 +508,14 @@ export type Database = {
           user_id: string
         }
         Update: {
+          aggregators_exploded?: number
           candidates_seen?: number
           created_at?: string
           credits_estimate?: number
           current_query?: string | null
           enriched_count?: number
           error?: string | null
+          extracted_businesses?: number
           failure_reason?: string | null
           hard_ceiling?: number
           high_quality_count?: number

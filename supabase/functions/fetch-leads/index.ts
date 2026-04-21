@@ -31,14 +31,50 @@ const ENRICH_TOP_N = 25;
 const SEARCH_CREDIT_PER_CALL = 1;
 const SCRAPE_CREDIT_PER_CALL = 1;
 
+// Aggregator explosion budget (mining listicles for individual businesses).
+const MAX_AGGREGATORS_PER_RUN = 8;
+const MAX_BUSINESSES_PER_AGGREGATOR = 15;
+const AGGREGATOR_SCRAPE_CONCURRENCY = 3;
+const AGGREGATOR_CEILING_GUARD = 20; // skip explosion when within N of hard ceiling
+
+// Hosts we never insert as leads AND never try to mine (social, search, marketplaces).
 const HOST_BLOCKLIST = [
   "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
   "youtube.com", "tiktok.com", "pinterest.com", "reddit.com", "quora.com",
   "wikipedia.org", "yelp.com", "tripadvisor.com", "yellowpages.com",
   "maps.google.com", "google.com", "bing.com", "duckduckgo.com",
-  "amazon.com", "ebay.com", "etsy.com", "medium.com", "substack.com",
+  "amazon.com", "ebay.com", "etsy.com",
   "github.com", "indeed.com", "glassdoor.com", "crunchbase.com",
 ];
+
+// Hosts that publish listicles/blogs/directories. We DO NOT insert them as leads,
+// but we DO scrape them and extract the businesses they mention.
+const LISTICLE_HOSTS = [
+  "techcabal.com", "techpoint.africa", "businessday.ng", "guardian.ng",
+  "premiumtimesng.com", "punchng.com", "thecable.ng", "nairametrics.com",
+  "ventureburn.com", "disrupt-africa.com", "disruptafrica.com",
+  "medium.com", "substack.com",
+  "forbes.com", "inc.com", "entrepreneur.com", "fastcompany.com", "techcrunch.com",
+  "clutch.co", "goodfirms.co", "g2.com", "capterra.com", "trustpilot.com",
+  "producthunt.com", "owler.com",
+];
+
+const LISTICLE_TITLE_RE = /^(top|best|leading|\d+\s+best|\d+\s+top|\d+\s+leading)\b/i;
+const LISTICLE_KEYWORD_RE = /(list of|directory|companies in|startups in|agencies in|firms in|businesses in)/i;
+const LISTICLE_PATH_RE = /\/(blog|article|articles|news|posts|post|list|directory|guides?|insights?)\//i;
+
+const isListicleHost = (h: string) => LISTICLE_HOSTS.some((b) => h === b || h.endsWith(`.${b}`));
+
+function looksLikeAggregator(hit: { url: string; title?: string }, host: string): boolean {
+  if (isListicleHost(host)) return true;
+  const t = (hit.title ?? "").trim();
+  if (t && (LISTICLE_TITLE_RE.test(t) || LISTICLE_KEYWORD_RE.test(t))) return true;
+  try {
+    const path = new URL(hit.url).pathname;
+    if (LISTICLE_PATH_RE.test(path)) return true;
+  } catch { /* ignore */ }
+  return false;
+}
 
 const json = (status: number, payload: unknown) =>
   new Response(JSON.stringify(payload), {
@@ -269,6 +305,114 @@ async function firecrawlScrape(apiKey: string, url: string, location: ReturnType
   };
 }
 
+// Lightweight scrape for aggregator pages — markdown + links only (no AI summary).
+async function firecrawlScrapeAggregator(apiKey: string, url: string): Promise<{ markdown: string; links: string[] } | null> {
+  try {
+    const res = await fetch(`${FIRECRAWL_V2}/scrape`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ url, formats: ["markdown", "links"], onlyMainContent: true }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const markdown: string = data?.data?.markdown ?? data?.markdown ?? "";
+    const links: string[] = data?.data?.links ?? data?.links ?? [];
+    if (!markdown && (!links || links.length === 0)) return null;
+    return { markdown, links: Array.isArray(links) ? links : [] };
+  } catch (e) {
+    console.error(`Aggregator scrape failed for ${url}`, e);
+    return null;
+  }
+}
+
+type ExtractedBusiness = { name: string; website?: string | null; snippet?: string | null };
+
+// AI extracts businesses mentioned in a listicle/blog page.
+async function extractBusinessesFromPage(
+  apiKey: string,
+  ctx: { url: string; title: string; markdown: string; links: string[] },
+): Promise<{ businesses: ExtractedBusiness[]; is_listicle: boolean; list_topic: string }> {
+  const trimmedMd = (ctx.markdown ?? "").slice(0, 12000);
+  const trimmedLinks = (ctx.links ?? []).slice(0, 80);
+  const sys = `You extract individual businesses/organisations mentioned in articles, listicles, blog posts, or directory pages. Only return real businesses with their own websites — skip the publisher's own site, social media handles, generic categories, and aggregators.`;
+  const user = `PAGE URL: ${ctx.url}
+PAGE TITLE: ${ctx.title}
+
+OUTBOUND LINKS ON PAGE (use to resolve mentioned business names to websites):
+${trimmedLinks.map((l) => `- ${l}`).join("\n") || "(none)"}
+
+PAGE CONTENT (markdown):
+${trimmedMd}
+
+Extract every distinct business/organisation mentioned. For each:
+- name: official business name (cleaned)
+- website: homepage URL (resolve from outbound links if not inline; null if not findable)
+- snippet: 1-line description of why they were mentioned
+
+Cap at ${MAX_BUSINESSES_PER_AGGREGATOR}. Skip the publisher itself and any aggregator/directory hosts.`;
+
+  try {
+    const res = await fetch(LOVABLE_AI, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "extract_businesses",
+            description: "Return businesses mentioned in the page.",
+            parameters: {
+              type: "object",
+              properties: {
+                is_listicle: { type: "boolean" },
+                list_topic: { type: "string", description: "Short topic of the list/article" },
+                businesses: {
+                  type: "array",
+                  maxItems: MAX_BUSINESSES_PER_AGGREGATOR,
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      website: { type: ["string", "null"] },
+                      snippet: { type: ["string", "null"] },
+                    },
+                    required: ["name"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["is_listicle", "list_topic", "businesses"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "extract_businesses" } },
+      }),
+    });
+    if (!res.ok) {
+      console.error(`extract_businesses failed: ${res.status}`);
+      return { businesses: [], is_listicle: false, list_topic: "" };
+    }
+    const data = await res.json();
+    const args = data?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    if (!args) return { businesses: [], is_listicle: false, list_topic: "" };
+    const parsed = JSON.parse(args);
+    return {
+      businesses: Array.isArray(parsed.businesses) ? parsed.businesses.slice(0, MAX_BUSINESSES_PER_AGGREGATOR) : [],
+      is_listicle: !!parsed.is_listicle,
+      list_topic: typeof parsed.list_topic === "string" ? parsed.list_topic : "",
+    };
+  } catch (e) {
+    console.error("extract_businesses error", e);
+    return { businesses: [], is_listicle: false, list_topic: "" };
+  }
+}
+
 async function runFetch(
   supabase: any,
   runId: string,
@@ -351,6 +495,12 @@ async function runFetch(
     let totalAttempts = 0;
     let totalRetries = 0;
     let lastSearchError: string | undefined;
+    let aggregatorsExploded = 0;
+    let extractedBusinesses = 0;
+
+    type AggregatorHit = { hit: FirecrawlHit; host: string; icp: string };
+    const aggregatorQueue: AggregatorHit[] = [];
+    const seenAggregatorUrls = new Set<string>();
 
     const processBatch = async (batch: PlannedQuery[]): Promise<{ outOfCredits: boolean; batchInserted: number }> => {
       await update({ current_query: batch[0].icp });
@@ -383,6 +533,16 @@ async function runFetch(
           const host = rootDomain(hit.url);
           if (!host) continue;
           if (isBlockedHost(host)) continue;
+
+          // Aggregator/listicle? → queue for explosion, do NOT insert as a lead.
+          if (looksLikeAggregator(hit, host)) {
+            if (!seenAggregatorUrls.has(hit.url) && aggregatorQueue.length < MAX_AGGREGATORS_PER_RUN * 3) {
+              seenAggregatorUrls.add(hit.url);
+              aggregatorQueue.push({ hit, host, icp: q.icp });
+            }
+            continue;
+          }
+
           if (isExcludedTld(host) && totalInserted + newLeads.length > 80) continue;
           if (existingDomains.has(host)) continue;
           existingDomains.add(host);
@@ -448,6 +608,115 @@ async function runFetch(
       return { outOfCredits, batchInserted };
     };
 
+    // Explode queued aggregator/listicle pages into individual business leads.
+    const explodeAggregators = async (): Promise<void> => {
+      if (aggregatorQueue.length === 0) return;
+      if (totalInserted >= hardCeiling - AGGREGATOR_CEILING_GUARD) {
+        log(`Skipping aggregator explosion — within ${AGGREGATOR_CEILING_GUARD} of ceiling`);
+        return;
+      }
+      const regionLc = (region.region || "").toLowerCase();
+      const ranked = [...aggregatorQueue].sort((a, b) => {
+        const ar = (a.hit.title ?? "").toLowerCase().includes(regionLc) ? 1 : 0;
+        const br = (b.hit.title ?? "").toLowerCase().includes(regionLc) ? 1 : 0;
+        return br - ar;
+      }).slice(0, MAX_AGGREGATORS_PER_RUN);
+
+      log(`Exploding ${ranked.length} aggregator page(s) to mine individual businesses`);
+
+      for (let i = 0; i < ranked.length; i += AGGREGATOR_SCRAPE_CONCURRENCY) {
+        if (await checkStopped()) return;
+        if (totalInserted >= hardCeiling) return;
+        const slice = ranked.slice(i, i + AGGREGATOR_SCRAPE_CONCURRENCY);
+
+        await Promise.all(slice.map(async (agg) => {
+          if (totalInserted >= hardCeiling) return;
+          const scraped = await firecrawlScrapeAggregator(firecrawlKey, agg.hit.url);
+          creditsEstimate += SCRAPE_CREDIT_PER_CALL;
+          if (!scraped) {
+            log(`Aggregator scrape failed: ${agg.hit.url}`, "warn");
+            return;
+          }
+          aggregatorsExploded += 1;
+
+          const extracted = await extractBusinessesFromPage(lovableKey, {
+            url: agg.hit.url,
+            title: agg.hit.title ?? "",
+            markdown: scraped.markdown,
+            links: scraped.links,
+          });
+
+          const aggHost = agg.host;
+          const topic = extracted.list_topic || (agg.hit.title ?? "list");
+          const childRows: any[] = [];
+
+          for (const biz of extracted.businesses) {
+            if (totalInserted + childRows.length >= hardCeiling) break;
+            if (!biz.name || biz.name.trim().length < 2) continue;
+            if (!biz.website) continue;
+            const childHost = rootDomain(biz.website);
+            if (!childHost) continue;
+            if (childHost === aggHost) continue;
+            if (isBlockedHost(childHost)) continue;
+            if (isListicleHost(childHost)) continue;
+            if (isExcludedTld(childHost) && totalInserted + childRows.length > 80) continue;
+            if (existingDomains.has(childHost)) continue;
+            existingDomains.add(childHost);
+            extractedBusinesses += 1;
+
+            const snippet = (biz.snippet ?? "").slice(0, 400);
+            const note = `Source: AI fetch — extracted from list "${topic}" on ${aggHost}\n${snippet}`;
+            const signal =
+              (snippet.length > 80 ? 2 : 0) +
+              (childHost.endsWith(`.${region.countryCode}`) ? 3 : 0) + 2;
+
+            childRows.push({
+              user_id: userId,
+              business_name: biz.name.trim().slice(0, 200),
+              website: biz.website,
+              notes: note,
+              status: "new",
+              campaign_id: null,
+              __signal: signal,
+            });
+          }
+
+          if (childRows.length > 0) {
+            const insertRows = childRows.map(({ __signal, ...rest }) => rest);
+            const { data: inserted, error: insErr } = await supabase
+              .from("leads")
+              .insert(insertRows)
+              .select("id,score");
+            if (insErr) {
+              log(`Aggregator insert error: ${insErr.message}`, "error");
+            } else {
+              const inc = inserted?.length ?? 0;
+              totalInserted += inc;
+              (inserted ?? []).forEach((row: any, idx: number) => {
+                candidatesForEnrichment.push({ id: row.id, signal: childRows[idx].__signal });
+              });
+              const hq = (inserted ?? []).filter((r: any) => (r.score ?? 0) >= 50).length;
+              const { data: cur } = await supabase.from("lead_fetch_runs").select("high_quality_count").eq("id", runId).maybeSingle();
+              await update({
+                inserted_count: totalInserted,
+                high_quality_count: (cur?.high_quality_count ?? 0) + hq,
+                aggregators_exploded: aggregatorsExploded,
+                extracted_businesses: extractedBusinesses,
+                credits_estimate: creditsEstimate,
+              });
+              log(`+${inc} leads from list "${topic}" on ${aggHost}`);
+            }
+          } else {
+            await update({
+              aggregators_exploded: aggregatorsExploded,
+              extracted_businesses: extractedBusinesses,
+              credits_estimate: creditsEstimate,
+            });
+          }
+        }));
+      }
+    };
+
     // 4. Run searches in batches of MAX_CONCURRENT
     for (let i = 0; i < planned.length; i += MAX_CONCURRENT) {
       if (await checkStopped()) {
@@ -489,6 +758,16 @@ async function runFetch(
         }
       }
       log(`After fallback — ${totalInserted} inserted from ${totalSeen} candidates`);
+    }
+
+    // 4c. Explode aggregator/listicle pages → mine individual businesses.
+    if (!(await checkStopped())) {
+      try {
+        await explodeAggregators();
+      } catch (e) {
+        log(`Aggregator explosion failed: ${e instanceof Error ? e.message : String(e)}`, "warn");
+      }
+      log(`After aggregator explosion — ${totalInserted} inserted (exploded ${aggregatorsExploded} pages → ${extractedBusinesses} businesses)`);
     }
 
     log(`Search done — ${totalInserted} inserted from ${totalSeen} candidates`);
@@ -542,12 +821,22 @@ async function runFetch(
       const parts: string[] = [];
       if (totalSeen === 0) parts.push("No search results returned by Firecrawl across all queries and fallback variants.");
       else parts.push(`${totalSeen} candidates returned but all were filtered (blocklisted hosts, excluded TLDs, or duplicates of existing leads).`);
+      if (aggregatorsExploded > 0) {
+        parts.push(`Aggregators exploded: ${aggregatorsExploded} · businesses extracted: ${extractedBusinesses} · inserted after dedupe: 0.`);
+      } else if (aggregatorQueue.length > 0) {
+        parts.push(`${aggregatorQueue.length} list/blog pages were detected but explosion produced no usable businesses.`);
+      }
       if (lastSearchError) parts.push(`Last search error: ${lastSearchError}.`);
       parts.push(`Try widening offerings/keywords, raising max retries (current: ${maxRetries}), or checking Firecrawl quota.`);
       failureReason = parts.join(" ");
     }
 
-    await update({ state: "done", failure_reason: failureReason });
+    await update({
+      state: "done",
+      failure_reason: failureReason,
+      aggregators_exploded: aggregatorsExploded,
+      extracted_businesses: extractedBusinesses,
+    });
     log(`✓ Done — ${totalInserted} leads inserted, ~${creditsEstimate} credits used`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
