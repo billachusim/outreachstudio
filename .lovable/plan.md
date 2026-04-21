@@ -1,98 +1,121 @@
 
 
-# CTO Audit & Roadmap
+# Intel → Action: Full Build
 
-## Where we are (honest snapshot)
+## What we're shipping (everything across all 4 phases)
 
-**Working well:**
-- Discovery → enrich → draft → send pipeline runs end-to-end (67 leads, 19 sent)
-- 13 offerings seeded, 4 memory files (identity/personality/portfolio/playbook), Studio Agent with 9 tools
-- Channels infra wired (WhatsApp/X/FB/IG functions exist)
+### Phase 1 — Pitch from intel
+- "Draft pitch from intel" drawer on each `/intel` card → AI drafts pitch grounded in article + matched offering + memory → save as draft or send
+- New agent tool `draft_pitch_from_intel` so Studio Agent can draft from a headline by name
+- Auto-link intel to existing leads by domain match (during scan, after insert)
+- Dashboard "Today's Top Triggers" widget (top 3 by score, quick "Draft pitch" button)
 
-**Gaps I found:**
-1. **No cron job actually scheduled.** `pg_cron` + `pg_net` are installed but no schedule exists — the engine only ticks when you click. This is the #1 fix.
-2. **0 channel accounts connected.** All the social/WhatsApp wiring is dormant.
-3. **0 replies ever recorded.** Resend webhook isn't capturing opens/replies, so the funnel ends at "sent" — you never know what works.
-4. **Inbox is read-only "sent log"** — not an actual inbox. No reply threading.
-5. **Daily cap is per-user across ALL campaigns** (not per-campaign, not per-channel) — easy to silently throttle.
-6. **No lead scoring, no dedupe across campaigns, no follow-up sequences.** A lead that goes silent is just… lost.
-7. **Agent has read tools but few action tools** — can't draft pitches, can't bulk-update leads, can't post to social, can't trigger enrichment.
-8. **No analytics page** — open rate, reply rate, per-offering performance all live in your head.
-9. **No competitor / news / trigger-event monitoring** — the doc's whole "PR-driven outreach" idea is unbuilt.
+### Phase 2 — Auto-discover leads from intel
+- "Create lead from this story" button on intel cards → Firecrawl scrapes article → extracts company + website + person → runs `enrich-lead` → inserts lead under matched offering's campaign
+- Per-offering toggle `auto_lead_from_intel` (off by default) → daily cron auto-creates leads from score ≥ 80 items, queued as `status='new'` for your review before send
 
----
+### Phase 3 — Smarter intel
+- **Custom sources page** at `/intel/sources` → add your own URLs/RSS feeds (Disrupt Africa, Ventures Africa, niche blogs); scan-intel reads from a new `intel_sources` table merged with the 3 hardcoded defaults
+- **Keyword boosters per offering** → new `trigger_keywords text[]` column on `offerings`; scoring prompt gets these keywords and bumps score when matched
+- **Decay & cleanup** → daily cron deletes intel items older than 14 days that are unactioned and have no linked pitch/lead
 
-## Roadmap — 4 tracks, prioritized
+### Phase 4 — Content engine
+- New `social_drafts` table: stores AI-drafted posts (X thread, LinkedIn, IG caption) tied to an intel item
+- New edge function `draft-social-from-intel` → runs nightly on top intel items tagged "commentary-worthy"; also callable manually per intel card via "Draft social post" button
+- New `/social` page with tabs for **X**, **LinkedIn**, **Instagram** drafts → each card shows the post, source intel, copy button, "Auto-post" button (uses existing `post-x` / `post-facebook` / `post-instagram` functions when channels are connected; otherwise greyed out with "Connect channel" hint)
+- Add **Social** entry to sidebar + mobile tab bar
 
-### Track 1 — Make it actually run on autopilot (MUST-HAVE, ship first)
+### Weekly digest
+- New cron `weekly-intel-digest` Sunday 6pm WAT → emails you (via Resend) a summary of the week's intel, what was pitched, what's still unactioned, top scorers
 
-1. **Schedule `campaign-tick` every minute via pg_cron** — the single change that makes everything you built actually autonomous.
-2. **Resend webhook handler** — new function `resend-webhook` + a `pitch_events` table. Captures `delivered / opened / clicked / bounced / complained / replied`. Updates `leads.status` automatically.
-3. **Real Inbox** — query `pitch_events` + `channel_messages` together, threaded per-lead, mark-as-read, quick-reply box that drafts via AI.
-4. **Per-channel daily caps** on `campaigns` (email_cap, whatsapp_cap, social_cap) instead of one global number.
+## Database changes (one migration)
 
-### Track 2 — Smarter leads (HIGH VALUE)
+```sql
+-- Phase 3: custom sources per user
+create table public.intel_sources (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  name text not null,
+  url text not null,
+  enabled boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table public.intel_sources enable row level security;
+-- own-row CRUD policies
 
-5. **Lead scoring** — new `leads.score` (0-100) computed from: has email ✓, has phone ✓, website live ✓, enrichment summary mentions offering keywords ✓, recent activity ✓. Cron recomputes nightly.
-6. **Cross-campaign dedupe** — global unique on `(user_id, root_domain)`. Stops you pitching the same business under two offerings.
-7. **Follow-up sequences** — new `pitch_sequences` table: if no reply after N days, auto-draft & send follow-up #1, #2, #3 with different angles. Engine ticks them like normal.
-8. **Reply intent classifier** — when a reply comes in, AI tags it `interested / not-interested / unsubscribe / question / out-of-office` and updates `leads.status` + alerts you only on "interested" or "question".
-9. **Apollo / Hunter.io email finder** as a second enrichment step when Firecrawl finds no email (your call whether to add — Hunter free tier = 25/mo, paid ~$34/mo).
+-- Phase 3: keyword boosters
+alter table public.offerings add column trigger_keywords text[] default '{}';
 
-### Track 3 — Agent superpowers (FUN + LEVERAGE)
+-- Phase 2: per-offering auto-lead toggle
+alter table public.offerings add column auto_lead_from_intel boolean not null default false;
 
-Give the Studio Agent these new tools so you can run the studio from chat:
-10. `draft_pitch_for_lead`, `send_pitch_now`, `bulk_update_lead_status`, `create_campaign`, `enrich_lead_now`, `send_whatsapp`, `post_to_x`, `post_to_facebook`, `post_to_instagram`, `score_lead`, `summarize_today`, `find_similar_leads`.
-11. **Daily morning briefing** — cron at 8am triggers agent to read events from last 24h and post a summary into a new `daily_briefings` table you see on the dashboard ("3 sent, 1 replied (warm), Eavesdrop campaign stalled — needs more leads").
-12. **Proactive nudges** — when something happens (reply, bounce, run done), agent decides whether to act or alert you.
+-- Phase 1: link intel ↔ lead and intel ↔ pitch
+alter table public.intel_items add column linked_lead_id uuid;
+alter table public.intel_items add column linked_pitch_id uuid;
+create index on public.intel_items(linked_lead_id);
 
-### Track 4 — Intel & content (POWERFUL EXTRAS)
+-- Phase 4: social drafts
+create table public.social_drafts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  intel_item_id uuid,
+  platform text not null,            -- 'x' | 'linkedin' | 'instagram'
+  body text not null,
+  status text not null default 'draft', -- draft | posted | dismissed
+  posted_at timestamptz,
+  provider_post_id text,
+  created_at timestamptz not null default now()
+);
+alter table public.social_drafts enable row level security;
+-- own-row CRUD policies
+```
 
-13. **Competitor / news monitor** — Firecrawl scheduled scans of Techcabal, Techpoint, BusinessDay tech section daily → new `intel_items` table → agent surfaces relevant ones in the briefing → can draft AutoPR pitches off them automatically.
-14. **Auto-content engine** — for any offering, weekly cron drafts 3 X posts + 1 FB/IG post grounded in your memory files; you approve from a queue; auto-posts on schedule.
-15. **WhatsApp inbound auto-reply** — webhook already exists; add AI-drafted suggested replies in the inbox, one-click send.
-16. **Per-offering dashboard** — funnel chart (discovered → emailed → opened → replied → won), best-performing subject lines, optimal send time.
+## New edge functions
 
----
+- `draft-pitch-from-intel` — input: `intel_item_id`, optional `offering_id` → returns `{subject, body}` + saves a `pitches` row
+- `intel-to-lead` — input: `intel_item_id` → Firecrawl scrape article → AI extract `{company, website, contact_name?}` → call `enrich-lead` → insert into `leads` → link back to intel item
+- `draft-social-from-intel` — input: `intel_item_id`, `platform` → AI drafts post → insert `social_drafts` row
+- `weekly-intel-digest` — cron, emails user via Resend
+- `cleanup-intel` — cron, deletes stale unactioned items
 
-## What I propose we ship in THIS round
+## Modified edge functions
 
-To keep the loop tight and high-impact, I'd build **Track 1 entirely + the highest-leverage pieces of Tracks 2 & 3:**
+- `scan-intel` — read `intel_sources` for the user, merge with defaults; pass each offering's `trigger_keywords` into the scoring prompt; after insert, match `extract_root_domain(url)` against `leads.root_domain` to set `linked_lead_id`; if offering has `auto_lead_from_intel=true` and score ≥ 80, fire `intel-to-lead`
+- `studio-agent` — register new tool `draft_pitch_from_intel({headline_or_id, offering_hint?})`
+- `daily-briefing` — already pulls intel; no change needed
 
-- [ ] Schedule `campaign-tick` cron (every minute)
-- [ ] `resend-webhook` function + `pitch_events` table + auto-update lead status on opens/replies
-- [ ] Reply intent classifier (AI tags incoming replies)
-- [ ] Real threaded **Inbox** (email replies + WhatsApp + social, per-lead threads, AI quick-reply)
-- [ ] Per-channel daily caps on campaigns
-- [ ] Cross-campaign domain dedupe
-- [ ] Lead scoring (computed live + nightly cron)
-- [ ] Follow-up sequences (1-2-3 cadence, configurable)
-- [ ] Daily morning briefing cron + dashboard widget
-- [ ] Expand Studio Agent toolset (~10 new tools listed in #10)
+## Cron jobs (added)
 
-I'll **defer** to a later round (because they need user decisions or paid services):
-- Hunter.io enrichment (you'd need to pay)
-- Competitor news monitor (worth its own focused round)
-- Auto-content engine (needs your approval-flow preferences)
-- Per-offering analytics page (better after we have replies data)
+| Job | Schedule (UTC) | Local (WAT) |
+|---|---|---|
+| `cleanup-intel` | `0 4 * * *` | 5am daily |
+| `draft-social-from-intel` (nightly batch) | `30 5 * * *` | 6:30am daily |
+| `weekly-intel-digest` | `0 17 * * 0` | 6pm Sunday |
 
-## Files this will touch
+## New / modified UI
 
-**New migrations:** `pitch_events`, `pitch_sequences`, `daily_briefings`, `intel_items` (stub for later), `leads.score`, `leads.last_activity_at`, `campaigns.email_cap/whatsapp_cap/social_cap/follow_up_days`, unique index on `(user_id, root_domain(website))`, 2 cron schedules.
+**New files:**
+- `src/components/IntelPitchDrawer.tsx` — drawer with AI-drafted pitch, edit, save/send
+- `src/components/IntelLeadDrawer.tsx` — confirms extracted company before creating lead
+- `src/pages/Social.tsx` — tabs (X / LinkedIn / Instagram), copy + auto-post per card
+- `src/pages/IntelSources.tsx` — manage custom sources
+- `src/components/TopTriggersWidget.tsx` — dashboard widget
 
-**New functions:** `resend-webhook`, `classify-reply`, `score-leads-nightly`, `daily-briefing`, `follow-up-tick`.
+**Modified:**
+- `src/pages/Intel.tsx` — add "Draft pitch", "Create lead", "Draft social", and a link to `/intel/sources`; show linked-lead badge
+- `src/pages/Dashboard.tsx` — embed `<TopTriggersWidget />`
+- `src/pages/Offerings.tsx` — add `trigger_keywords` chip-input + `auto_lead_from_intel` toggle per offering
+- `src/components/AppSidebar.tsx` + `src/components/MobileTabBar.tsx` — add **Social** entry
+- `src/App.tsx` — add `/social` and `/intel/sources` routes
 
-**Modified functions:** `campaign-tick` (channel-aware caps, dedupe, sequences hook), `studio-agent` (10 new tools), `whatsapp-webhook` (classify intent, update status).
+## Two decisions before I build
 
-**Modified pages:** `Inbox.tsx` (full rewrite — threaded), `Dashboard.tsx` (briefing widget + funnel snapshot), `Campaigns.tsx` (per-channel caps + follow-up days), `Leads.tsx` (score column).
+1. **Mobile tab bar already has 5 items (Studio, Agent, Campaigns, Leads, Inbox).** Adding Social makes 6 — feels cramped on mobile. Options:
+   - **A:** Replace **Campaigns** with **Social** in the mobile bar (Campaigns stays in sidebar). Cleaner.
+   - **B:** Show 6 tabs, slightly tighter spacing.
+   - **Default if no answer: A.**
 
-## Open questions (1 min)
+2. **Auto-lead from intel default:** off per offering, you flip it on per-offering as you trust it. **Default: off.** OK?
 
-Before I dive in, one decision shapes the build:
-
-1. **Follow-up cadence default** — Day 3 → Day 7 → Day 14, or tighter (Day 2 → Day 5)?
-2. **Briefing time** — 8am Lagos time? Push notification later, for now just on dashboard?
-3. **Resend webhook** — I can wire it to a public function endpoint; you'd just paste one URL into Resend dashboard. OK?
-
-If you say "just pick sane defaults and go," I will (Day 3/7/14, 8am WAT, yes wire the webhook URL).
+If you say "go", defaults apply and I build everything in this round.
 
