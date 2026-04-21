@@ -466,12 +466,17 @@ export type Database = {
           current_query: string | null
           enriched_count: number
           error: string | null
+          failure_reason: string | null
           hard_ceiling: number
           high_quality_count: number
           id: string
           inserted_count: number
+          max_leads: number
+          max_retries: number
           queries_planned: number
           queries_run: number
+          query_attempts: number
+          retries_used: number
           state: string
           updated_at: string
           user_id: string
@@ -483,12 +488,17 @@ export type Database = {
           current_query?: string | null
           enriched_count?: number
           error?: string | null
+          failure_reason?: string | null
           hard_ceiling?: number
           high_quality_count?: number
           id?: string
           inserted_count?: number
+          max_leads?: number
+          max_retries?: number
           queries_planned?: number
           queries_run?: number
+          query_attempts?: number
+          retries_used?: number
           state?: string
           updated_at?: string
           user_id: string
@@ -500,12 +510,17 @@ export type Database = {
           current_query?: string | null
           enriched_count?: number
           error?: string | null
+          failure_reason?: string | null
           hard_ceiling?: number
           high_quality_count?: number
           id?: string
           inserted_count?: number
+          max_leads?: number
+          max_retries?: number
           queries_planned?: number
           queries_run?: number
+          query_attempts?: number
+          retries_used?: number
           state?: string
           updated_at?: string
           user_id?: string
