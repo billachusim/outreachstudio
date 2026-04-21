@@ -1,75 +1,70 @@
 
 
-# Daily journal + self-evolving agent memory
+# Auto-launch a campaign from an Intel story
 
-## What we're building
+A new **"Launch campaign"** button on each intel card that does the entire pipeline in one click: pick or invent an offering → create a campaign tuned to the story → kick the outreach engine that finds, enriches, drafts, and sends.
 
-The agent already has read/write memory tools and the Memory dashboard already supports any markdown file. We're layering on **(1) automated daily journaling**, **(2) a richer self-editing toolset**, and **(3) UI surfaces** so the system genuinely learns over time.
+## What you'll see on the Intel page
 
-### 1. New edge function: `daily-journal`
-Runs nightly (10:30 PM WAT, after the day is done). For each user it:
-- Pulls the last 24h of activity: pitches sent, opens/replies/bounces, run state changes, run errors, leads created/won/lost, intel scanned + acted-on, social drafts created/posted, channel message failures.
-- Pulls the previous day's `daily-journal-YYYY-MM-DD` memory (if any) to chain context.
-- Calls Lovable AI (`gemini-2.5-flash-lite` — cheap) with a tight prompt to produce a structured markdown journal:
-  - **What happened** (sends, replies, wins)
-  - **What worked** (top-performing subjects, channels, intel triggers)
-  - **What failed** (errors, bounces, dead campaigns) with root cause if obvious
-  - **Important keywords / patterns spotted today**
-  - **Notes for tomorrow** (1–3 concrete suggestions)
-- Upserts a memory row with slug `daily-journal-YYYY-MM-DD`, kind `note`, title `Daily journal — Apr 21, 2026`.
-- Also upserts a rolling `journal-rollup` memory: a condensed bullet list of the last 7 days' headlines, so the agent always has a one-glance recap without us pumping 7 full journals into context.
+A new primary action `🚀 Launch campaign` next to the existing "Draft pitch" / "Create lead" buttons.
 
-### 2. Pruning so memory doesn't bloat tokens
-- Keep at most the **last 14** `daily-journal-*` files. Older ones get deleted by `daily-journal` after writing.
-- The `journal-rollup` memory stays compact (capped at ~2KB).
-- The agent's system prompt already injects ALL memories every turn — without pruning, journals would balloon AI cost. This keeps it bounded.
+Click → opens a small confirmation drawer showing:
+- **Offering**: matched existing one OR *"New offering will be created"* with a preview (title, tagline, ideal customer)
+- **Campaign**: name, derived city/category/keywords from the article
+- **Discovery target**: 20 leads, 20/day send cap (your defaults)
 
-### 3. Cron schedule (one new job)
-`daily-journal-nightly` at 22:30 WAT (21:30 UTC) calling the new function. Created via `psql` insert (not a migration — contains the function URL).
+Two buttons: `Edit details` (open expanded form) or `Launch now`.
 
-### 4. Expanded agent self-editing tools (in `studio-agent`)
-The agent currently has `list_memories`, `read_memory`, `write_memory`. We add:
-- **`delete_memory(slug)`** — retire stale notes.
-- **`append_memory(slug, content)`** — append a dated bullet to an existing file (cheaper + safer than rewriting).
-- **`rename_memory(slug, new_slug?, new_title?)`** — keep the index tidy.
-- **`search_memories(query)`** — ILIKE on title + content; agent can find without dumping everything.
+After launch → toast + redirect to the Studio dashboard so you can watch the run progress live.
 
-System prompt is updated to teach the agent the new "learning loop":
-> When you spot a recurring failure, a winning subject line, a new product detail Bill mentions, or an objection pattern → call `append_memory` to the right playbook file (or `write_memory` for a brand-new topic). Use kebab-case slugs like `objections-retailos`, `winning-subjects`, `lessons-learned`.
+## How it works under the hood
 
-### 5. Memory dashboard UI updates (`src/pages/Memory.tsx`)
-- **New "Journal" section** at the top, collapsed by default, listing the `daily-journal-*` notes newest first with the date prominent.
-- **"Generate today's journal now" button** that invokes `daily-journal` with `{ force: true, only_user: true }` — useful for end-of-day manual runs.
-- **Search box** filters memories by title/slug/content (client-side over the loaded list).
-- **Last updated** timestamp shown on every card.
-- **"Lessons learned" quick-create button**: pre-fills the dialog with slug `lessons-learned` so the user can dump notes the agent will read tomorrow.
+### New edge function: `launch-campaign-from-intel`
 
-### 6. One seed memory (`src/lib/seedAgentMemory.ts`)
-Add a new starter file `learning-loop` that documents the convention to the agent itself (slugs, when to append vs write, what kinds to use). Listed in `SEED_MEMORIES` so `seedAgentMemoryIfEmpty` and "Reset starters" pick it up.
+Takes `{ intelItemId }`, runs server-side:
 
-## Files touched
+1. **Load** the intel item + user's offerings + agent memory.
+2. **Match or create offering** via one Lovable AI call (`gemini-2.5-flash`, structured tool output):
+   - Input: intel title/summary/tags + list of existing offerings (id, title, tagline).
+   - Output: either `{ matchedOfferingId }` OR `{ newOffering: { title, tagline, problem_solved, ideal_customer, target_audience, trigger_keywords[] } }`.
+   - If new → insert into `offerings`.
+3. **Derive campaign params** from the same AI call:
+   - `name` (e.g. "Intel: Dangote expansion — 21 Apr"), `city`, `category`, `keywords`, `discovery_source` (`google_places` if local-business signal, else `firecrawl`).
+4. **Insert campaign** linked to that offering, status `active`, `email_cap = 20`.
+5. **Insert `campaign_runs` row** (`state: queued`, target 20 leads) — same shape `startOutreach` uses.
+6. **Mark intel** `acted_on = true`, store campaign id in a new note ("Spawned campaign X").
+7. **Invoke `campaign-tick`** with the new run id (fire-and-forget) so discovery starts immediately.
+8. Return `{ campaignId, runId, offeringId, offeringCreated: bool }`.
 
-**New:**
-- `supabase/functions/daily-journal/index.ts` — the nightly journaling job (also callable on-demand).
+The existing `campaign-tick` engine then handles the rest with no changes — discovery → enrichment → drafting → sending — using the new offering as pitch context and the keywords/city/category we set.
 
-**Edited:**
-- `supabase/functions/studio-agent/index.ts` — add 4 tools + system-prompt language about the learning loop.
-- `src/pages/Memory.tsx` — Journal section, search, "Generate today's journal" button, "Lessons learned" quick-create.
-- `src/lib/seedAgentMemory.ts` — add `learning-loop` seed.
+### New component: `IntelLaunchCampaignDrawer.tsx`
 
-**Cron (psql insert, no migration):**
-- Schedule `daily-journal-nightly` at 22:30 WAT.
+- Calls `launch-campaign-from-intel` with `dryRun: true` first → shows the AI's proposal.
+- User can edit the campaign name, city, category, keywords, channel (email/whatsapp), and toggle "use existing offering vs create new" before confirming.
+- Confirm → calls again with `dryRun: false` → toast + `navigate("/")`.
 
-## Cost notes (sticking to your single-user budget)
-- 1 AI call/day for the journal (`flash-lite`, ~1.5K input / 800 output tokens) ≈ negligible.
-- Pruning to 14 journals + rollup keeps the agent's per-turn system prompt under ~10KB even after months.
-- Manual "Generate now" button is fine — you've said you won't spam.
+The dry-run/confirm split costs 1 AI call total (we cache the proposal in component state between the two server calls — the second call accepts the already-decided params and skips AI).
+
+### Files
+
+- **New** `supabase/functions/launch-campaign-from-intel/index.ts` — orchestrator above.
+- **New** `src/components/IntelLaunchCampaignDrawer.tsx` — the confirm UI.
+- **Edit** `src/pages/Intel.tsx` — add `🚀 Launch campaign` button on each card; mount the drawer.
+- **Edit** `src/components/TopTriggersWidget.tsx` — add the same button (so you can launch from the dashboard widget too).
+
+## Cost & safety
+
+- 1 AI call per launch (cached between dry-run and confirm).
+- Campaign and run rows are real DB inserts — same as if you'd built it manually in the Campaigns tab. You can pause/end the run from the dashboard like any other.
+- If the AI can't pick or invent a sensible offering (e.g. unrelated story) the function returns 422 with a clear message and creates nothing.
 
 ## Open question
 
-Do you want the journal to also include a **weekly digest** memory file (slug `weekly-journal-YYYY-Www`, generated each Sunday night, summarizing the 7 daily journals into one)?
-- **A:** Yes — adds 1 AI call/week, gives the agent a "long memory" rollup per week. Recommended.
-- **B:** No — skip it, the rolling `journal-rollup` is enough.
+When the AI **invents a new offering**, should it:
 
-**Default if no answer: A.**
+- **A:** Save it as `status: 'draft'` so it doesn't pollute your active offerings list until you review it. *(Recommended — safer.)*
+- **B:** Save as `status: 'active'` immediately so it shows up everywhere right away.
+
+Default if no answer: **A**.
 
