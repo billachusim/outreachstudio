@@ -29,6 +29,7 @@ export type FetchRun = {
   credits_estimate: number;
   aggregators_exploded: number;
   extracted_businesses: number;
+  promoted_sources_count: number;
   error: string | null;
   failure_reason: string | null;
   created_at: string;
@@ -76,11 +77,22 @@ export const FetchLeadsProgress = ({ variant = "button", onChange }: Props) => {
       .channel(`fetch-runs-${user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "lead_fetch_runs", filter: `user_id=eq.${user.id}` }, (payload: any) => {
         const next = (payload.new ?? payload.old) as FetchRun;
-        setRun((prev) => {
-          if (!prev || new Date(next.created_at) >= new Date(prev.created_at)) return next;
-          return prev;
+        const prev = (payload.old ?? null) as FetchRun | null;
+        setRun((curr) => {
+          if (!curr || new Date(next.created_at) >= new Date(curr.created_at)) return next;
+          return curr;
         });
         onChange?.(next);
+        // Surface promotion toast when promoted_sources_count rises (typically at run completion).
+        const newPromoted = next?.promoted_sources_count ?? 0;
+        const oldPromoted = prev?.promoted_sources_count ?? 0;
+        if (newPromoted > oldPromoted) {
+          const added = newPromoted - oldPromoted;
+          toast({
+            title: `${added} new intel source${added === 1 ? "" : "s"} auto-added`,
+            description: "Promoted from listicles that produced quality leads. View in Intel → Sources.",
+          });
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -307,6 +319,17 @@ const ProgressDetail = ({ run, pct, onStop, hideStop }: { run: FetchRun; pct: nu
             <SummaryRow label="Businesses extracted" value={run.extracted_businesses} />
             <SummaryRow label="Credits used" value={`~${run.credits_estimate}`} />
           </div>
+          {run.promoted_sources_count > 0 && (
+            <a
+              href="/intel/sources"
+              className="flex items-center justify-between rounded border border-primary/30 bg-primary/5 px-2 py-1.5 text-[11px] hover:bg-primary/10"
+            >
+              <span className="font-medium text-primary">
+                ✨ Promoted {run.promoted_sources_count} new intel source{run.promoted_sources_count === 1 ? "" : "s"}
+              </span>
+              <span className="text-muted-foreground">View →</span>
+            </a>
+          )}
           {run.inserted_count === 0 && run.failure_reason && (
             <div className="flex items-start gap-1.5 rounded border border-warning/40 bg-warning/5 p-2 text-[11px] text-warning-foreground">
               <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />

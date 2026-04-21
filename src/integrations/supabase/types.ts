@@ -47,6 +47,45 @@ export type Database = {
         }
         Relationships: []
       }
+      aggregator_performance: {
+        Row: {
+          created_at: string
+          host: string
+          id: string
+          last_seen_at: string
+          promoted_at: string | null
+          promoted_to_intel: boolean
+          source_url: string
+          total_extracted: number
+          total_high_quality: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          host: string
+          id?: string
+          last_seen_at?: string
+          promoted_at?: string | null
+          promoted_to_intel?: boolean
+          source_url: string
+          total_extracted?: number
+          total_high_quality?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          host?: string
+          id?: string
+          last_seen_at?: string
+          promoted_at?: string | null
+          promoted_to_intel?: boolean
+          source_url?: string
+          total_extracted?: number
+          total_high_quality?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       campaign_runs: {
         Row: {
           campaign_id: string
@@ -433,6 +472,7 @@ export type Database = {
       }
       intel_sources: {
         Row: {
+          auto_promoted: boolean
           created_at: string
           enabled: boolean
           id: string
@@ -441,6 +481,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          auto_promoted?: boolean
           created_at?: string
           enabled?: boolean
           id?: string
@@ -449,6 +490,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          auto_promoted?: boolean
           created_at?: string
           enabled?: boolean
           id?: string
@@ -475,6 +517,7 @@ export type Database = {
           inserted_count: number
           max_leads: number
           max_retries: number
+          promoted_sources_count: number
           queries_planned: number
           queries_run: number
           query_attempts: number
@@ -499,6 +542,7 @@ export type Database = {
           inserted_count?: number
           max_leads?: number
           max_retries?: number
+          promoted_sources_count?: number
           queries_planned?: number
           queries_run?: number
           query_attempts?: number
@@ -523,6 +567,7 @@ export type Database = {
           inserted_count?: number
           max_leads?: number
           max_retries?: number
+          promoted_sources_count?: number
           queries_planned?: number
           queries_run?: number
           query_attempts?: number
