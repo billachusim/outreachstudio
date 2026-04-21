@@ -1,21 +1,13 @@
 // Generate one daily_briefings row per user with metrics + AI-written summary.
-// Cron at 08:00 WAT. Idempotent per user/date.
+// Cron at 08:00 WAT. Idempotent per user/date unless `force: true` is passed.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 
 const json = (s: number, p: unknown) =>
   new Response(JSON.stringify(p), { status: s, headers: { "Content-Type": "application/json" } });
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null);
+async function runBriefingJob(supabase: any, LOVABLE_API_KEY: string, force: boolean) {
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-
-    // All distinct users with any campaign
     const { data: users } = await supabase.from("campaigns").select("user_id");
     const userIds = Array.from(new Set((users ?? []).map((u: any) => u.user_id)));
     const today = new Date().toISOString().slice(0, 10);
@@ -23,10 +15,11 @@ Deno.serve(async (req) => {
 
     let made = 0;
     for (const userId of userIds) {
-      // Skip if already exists for today
-      const { data: existing } = await supabase
-        .from("daily_briefings").select("id").eq("user_id", userId).eq("briefing_date", today).maybeSingle();
-      if (existing) continue;
+      if (!force) {
+        const { data: existing } = await supabase
+          .from("daily_briefings").select("id").eq("user_id", userId).eq("briefing_date", today).maybeSingle();
+        if (existing) continue;
+      }
 
       const [pitchesRes, eventsRes, runsRes, warmRes, intelRes] = await Promise.all([
         supabase.from("pitches").select("id, sent_at").eq("user_id", userId).gte("sent_at", since),
@@ -43,7 +36,6 @@ Deno.serve(async (req) => {
       const replies = (eventsRes.data ?? []).filter((e: any) => e.event_type === "replied").length;
       const bounces = (eventsRes.data ?? []).filter((e: any) => e.event_type === "bounced").length;
       const activeRuns = (runsRes.data ?? []).filter((r: any) => !["done", "failed"].includes(r.state)).length;
-
       const intelItems = intelRes.data ?? [];
       const metrics = { sent, opens, replies, bounces, active_runs: activeRuns, intel_count: intelItems.length };
 
@@ -68,14 +60,31 @@ Deno.serve(async (req) => {
         bodyMd = `**Morning brief**\n\n- Sent: ${sent}\n- Opens: ${opens}\n- Replies: ${replies}\n- Bounces: ${bounces}\n- Active runs: ${activeRuns}${intelItems.length ? `\n- Fresh intel (${intelItems.length}):\n${intelLines}` : ""}`;
       }
 
+      if (force) {
+        await supabase.from("daily_briefings")
+          .delete().eq("user_id", userId).eq("briefing_date", today);
+      }
       await supabase.from("daily_briefings").insert({
         user_id: userId, briefing_date: today, body: bodyMd, metrics,
       });
       made++;
     }
-    return json(200, { ok: true, made });
+    console.log(`daily-briefing: made ${made}`);
   } catch (e) {
-    console.error("daily-briefing", e);
-    return json(500, { error: e instanceof Error ? e.message : "error" });
+    console.error("daily-briefing job error", e);
   }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null);
+  let force = false;
+  try { const b = await req.json(); force = !!b?.force; } catch { /* no body */ }
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+  // @ts-ignore EdgeRuntime is provided by Supabase
+  EdgeRuntime.waitUntil(runBriefingJob(supabase, LOVABLE_API_KEY, force));
+  return json(202, { ok: true, status: "briefing started in background" });
 });
