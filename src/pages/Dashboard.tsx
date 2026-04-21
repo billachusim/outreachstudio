@@ -228,12 +228,19 @@ const Dashboard = () => {
               const pct = r.target_lead_count > 0
                 ? Math.round((r.leads_sent / r.target_lead_count) * 100)
                 : 0;
+              const name = campaigns[r.campaign_id] ?? "(campaign)";
+              const isAutoFromIntel = name.startsWith("Auto:");
               return (
                 <div key={r.id} className="space-y-2 rounded-lg border p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">{campaigns[r.campaign_id] ?? "(campaign)"}</span>
+                      <span className="font-medium">{name}</span>
                       <Badge className={stateColors[r.state] ?? ""}>{r.state}</Badge>
+                      {isAutoFromIntel && (
+                        <Badge variant="outline" className="gap-1 text-[10px]">
+                          <Sparkles className="h-3 w-3" /> from intel
+                        </Badge>
+                      )}
                       {r.error && <span className="text-xs text-destructive">{r.error}</span>}
                     </div>
                     <div className="flex items-center gap-2">

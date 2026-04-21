@@ -386,6 +386,7 @@ export type Database = {
           published_at: string | null
           relevance_score: number | null
           source: string
+          spawned_campaign_id: string | null
           summary: string | null
           tags: string[] | null
           title: string
@@ -403,6 +404,7 @@ export type Database = {
           published_at?: string | null
           relevance_score?: number | null
           source: string
+          spawned_campaign_id?: string | null
           summary?: string | null
           tags?: string[] | null
           title: string
@@ -420,6 +422,7 @@ export type Database = {
           published_at?: string | null
           relevance_score?: number | null
           source?: string
+          spawned_campaign_id?: string | null
           summary?: string | null
           tags?: string[] | null
           title?: string

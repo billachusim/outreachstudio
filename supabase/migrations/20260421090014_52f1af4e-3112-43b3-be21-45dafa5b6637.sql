@@ -1,0 +1,2 @@
+ALTER TABLE public.intel_items ADD COLUMN IF NOT EXISTS spawned_campaign_id uuid NULL;
+CREATE INDEX IF NOT EXISTS idx_intel_items_spawned_campaign ON public.intel_items(spawned_campaign_id) WHERE spawned_campaign_id IS NOT NULL;
