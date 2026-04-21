@@ -303,6 +303,8 @@ const ProgressDetail = ({ run, pct, onStop, hideStop }: { run: FetchRun; pct: nu
             <SummaryRow label="Total candidates" value={run.candidates_seen} />
             <SummaryRow label="Inserted leads" value={run.inserted_count} />
             <SummaryRow label="High-quality" value={run.high_quality_count} />
+            <SummaryRow label="Lists mined" value={run.aggregators_exploded} />
+            <SummaryRow label="Businesses extracted" value={run.extracted_businesses} />
             <SummaryRow label="Credits used" value={`~${run.credits_estimate}`} />
           </div>
           {run.inserted_count === 0 && run.failure_reason && (
