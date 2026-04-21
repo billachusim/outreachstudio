@@ -401,10 +401,12 @@ const Leads = () => {
         lead={detailLead}
         open={detailOpen}
         onOpenChange={setDetailOpen}
+        campaigns={campaigns}
         onDraftPitch={(l) => { setDetailOpen(false); openDraft(l); }}
         onWhatsApp={(l) => { setDetailOpen(false); sendWhatsApp(l); }}
         onChanged={load}
       />
+      <ImportLeadsDialog open={importOpen} onOpenChange={setImportOpen} campaigns={campaigns} onImported={load} />
     </div>
   );
 };
