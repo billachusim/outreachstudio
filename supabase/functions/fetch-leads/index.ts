@@ -760,6 +760,16 @@ async function runFetch(
       log(`After fallback — ${totalInserted} inserted from ${totalSeen} candidates`);
     }
 
+    // 4c. Explode aggregator/listicle pages → mine individual businesses.
+    if (!(await checkStopped())) {
+      try {
+        await explodeAggregators();
+      } catch (e) {
+        log(`Aggregator explosion failed: ${e instanceof Error ? e.message : String(e)}`, "warn");
+      }
+      log(`After aggregator explosion — ${totalInserted} inserted (exploded ${aggregatorsExploded} pages → ${extractedBusinesses} businesses)`);
+    }
+
     log(`Search done — ${totalInserted} inserted from ${totalSeen} candidates`);
 
     // 5. Enrichment burst on top candidates
