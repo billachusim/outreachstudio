@@ -12,6 +12,12 @@
 // Uses SERVICE ROLE so it can run without a per-user JWT (cron has none).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  buildEnrichmentUpdates,
+  buildRegionalQuery,
+  fetchUserRegion,
+  firecrawlLocationParam,
+} from "../_shared/enrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -243,18 +249,26 @@ Deno.serve(async (req) => {
         return await fail("Firecrawl not connected — cannot discover leads.");
       }
 
+      // Region-anchored query
+      const region = await fetchUserRegion(supabase, run.user_id);
       const parts: string[] = [];
       if (campaign.category) parts.push(campaign.category);
       if (campaign.keywords) parts.push(campaign.keywords);
       if (campaign.city) parts.push(`in ${campaign.city}`);
+      else parts.push(`in ${region.region}`);
       if (parts.length === 0) parts.push(campaign.name);
-      const query = parts.join(" ");
+      const baseQuery = parts.join(" ");
+      const query = buildRegionalQuery(baseQuery, region);
 
       const wanted = Math.min(10, run.target_lead_count - have);
       const sres = await fetch(`${FIRECRAWL_V2}/search`, {
         method: "POST",
         headers: { Authorization: `Bearer ${FIRECRAWL_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query, limit: Math.max(wanted * 2, 10) }),
+        body: JSON.stringify({
+          query,
+          limit: Math.max(wanted * 2, 10),
+          location: firecrawlLocationParam(region),
+        }),
       });
       const sjson = await sres.json();
       if (!sres.ok) {
@@ -300,7 +314,7 @@ Deno.serve(async (req) => {
     if (run.state === "enriching") {
       const { data: lead } = await supabase
         .from("leads")
-        .select("id, business_name, website, contact_email, notes, status")
+        .select("id, business_name, website, contact_email, phone, contact_name, notes, status")
         .eq("campaign_id", campaign.id)
         .eq("status", "new")
         .not("website", "is", null)
@@ -336,29 +350,21 @@ Deno.serve(async (req) => {
         });
         const sjson = await res.json();
         const payload = sjson?.data ?? sjson;
-        const markdown: string = payload?.markdown ?? "";
-        const summary: string = payload?.summary ?? "";
-        const links: string[] = payload?.links ?? [];
 
-        const mailtoEmails = links
-          .filter((l) => typeof l === "string" && l.toLowerCase().startsWith("mailto:"))
-          .map((l) => l.replace(/^mailto:/i, "").split("?")[0].toLowerCase());
-        const emails = Array.from(new Set([...mailtoEmails, ...extractEmails(markdown)]));
-        const bestEmail = emails[0] ?? null;
+        const updates = await buildEnrichmentUpdates(LOVABLE_API_KEY, lead as any, {
+          markdown: payload?.markdown ?? "",
+          summary: payload?.summary ?? "",
+          links: payload?.links ?? [],
+        });
+        const finalUpdates: Record<string, unknown> = { ...updates, status: "enriched" };
 
-        const updates: Record<string, unknown> = { status: "enriched" };
-        if (!lead.contact_email && bestEmail) updates.contact_email = bestEmail;
-        if (summary) {
-          const block = `--- Enriched ${new Date().toISOString().slice(0, 10)} ---\n${summary}`;
-          const existing = ((lead.notes as string) ?? "").trim();
-          if (!existing.includes(summary.slice(0, 60))) {
-            updates.notes = existing ? `${existing}\n\n${block}` : block;
-          }
-        }
-        await supabase.from("leads").update(updates).eq("id", lead.id);
-        await logEvent("enriched",
-          bestEmail ? `Enriched ${lead.business_name} → ${bestEmail}` : `Enriched ${lead.business_name} (no email found)`,
-          "info", lead.id);
+        await supabase.from("leads").update(finalUpdates).eq("id", lead.id);
+        const foundEmail = updates.contact_email ?? lead.contact_email;
+        const foundPhone = updates.phone ?? lead.phone;
+        const summary = foundEmail
+          ? `Enriched ${lead.business_name} → ${foundEmail}${foundPhone ? ` · ${foundPhone}` : ""}`
+          : `Enriched ${lead.business_name}${foundPhone ? ` (☎ ${foundPhone})` : " (no email found)"}`;
+        await logEvent("enriched", summary, "info", lead.id);
         await updateRun({ leads_enriched: run.leads_enriched + 1 });
       } catch (e) {
         await supabase.from("leads").update({ status: "enriched" }).eq("id", lead.id);
