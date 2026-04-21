@@ -57,6 +57,47 @@ function deriveBusinessName(title: string, host: string): string {
 
 type PlannedQuery = { query: string; icp: string };
 
+// Broad, evergreen fallback queries used when AI-planned queries return too few leads.
+// These are deliberately generic so search engines return SOMETHING.
+function buildFallbackQueries(
+  region: RegionContext,
+  offerings: { title: string; target_audience?: string | null; trigger_keywords?: string[] }[],
+): PlannedQuery[] {
+  const r = region.region || "Nigeria";
+  const out: PlannedQuery[] = [];
+
+  // From offerings — use target_audience or trigger keywords directly
+  for (const o of offerings.slice(0, 4)) {
+    if (o.target_audience) {
+      out.push({ query: `${o.target_audience} ${r}`, icp: `${o.target_audience} (${r})` });
+    }
+    if (o.trigger_keywords && o.trigger_keywords.length > 0) {
+      const kw = o.trigger_keywords[0];
+      out.push({ query: `${kw} business ${r}`, icp: `${kw} (${r})` });
+    }
+  }
+
+  // Universal evergreen fallbacks
+  const universal = [
+    { query: `small businesses ${r}`, icp: `SMBs in ${r}` },
+    { query: `startups ${r}`, icp: `Startups in ${r}` },
+    { query: `agencies ${r}`, icp: `Agencies in ${r}` },
+    { query: `restaurants ${r}`, icp: `Restaurants in ${r}` },
+    { query: `hotels ${r}`, icp: `Hotels in ${r}` },
+    { query: `consulting firms ${r}`, icp: `Consulting in ${r}` },
+  ];
+  out.push(...universal);
+
+  // Dedupe by query string
+  const seen = new Set<string>();
+  return out.filter((q) => {
+    const k = q.query.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 async function planQueries(apiKey: string, ctx: {
   region: string;
   memories: { title: string; content: string }[];
