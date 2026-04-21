@@ -19,8 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb, AlertTriangle } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb } from "lucide-react";
 
 const STARTER_SLUGS = ["identity", "personality", "portfolio", "playbook", "learning-loop"];
 
