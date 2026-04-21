@@ -9,6 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sparkles, Save, Loader2 } from "lucide-react";
 
 type Offering = { id: string; title: string };
@@ -62,21 +64,29 @@ export const IntelPitchDrawer = ({ open, onOpenChange, intelItemId, intelTitle, 
     toast.success("Pitch drafted");
   };
 
+  // Save the in-memory draft directly — no second AI call
   const saveAsDraft = async () => {
     if (!intelItemId || !leadId || !subject.trim() || !body.trim()) {
       return toast.error("Pick a lead and draft a pitch first.");
     }
     setSaving(true);
-    const { data, error } = await supabase.functions.invoke("draft-pitch-from-intel", {
-      body: { intelItemId, offeringId: offeringId || null, leadId, save: true },
-    });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setSaving(false); return toast.error("Not signed in"); }
+
+    const { data: pitch, error: pErr } = await supabase
+      .from("pitches")
+      .insert({ user_id: user.id, lead_id: leadId, subject, body })
+      .select("id")
+      .single();
+    if (pErr || !pitch) { setSaving(false); return toast.error(pErr?.message ?? "Save failed"); }
+
+    // Link intel → pitch and bump lead status to drafted
+    await Promise.all([
+      supabase.from("intel_items").update({ linked_pitch_id: pitch.id, linked_lead_id: leadId, acted_on: true }).eq("id", intelItemId),
+      supabase.from("leads").update({ status: "drafted" }).eq("id", leadId),
+    ]);
+
     setSaving(false);
-    if (error) return toast.error(error.message);
-    if ((data as any)?.error) return toast.error((data as any).error);
-    // Override saved subject/body with what user has on screen if they edited
-    if ((data as any).pitchId) {
-      await supabase.from("pitches").update({ subject, body }).eq("id", (data as any).pitchId);
-    }
     toast.success("Saved as draft on the lead");
     onOpenChange(false);
   };
@@ -116,10 +126,18 @@ export const IntelPitchDrawer = ({ open, onOpenChange, intelItemId, intelTitle, 
               </div>
             </div>
 
-            <Button onClick={draft} disabled={drafting} className="w-full">
-              {drafting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
-              {drafting ? "Drafting…" : subject ? "Re-draft" : "Draft with AI"}
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button onClick={draft} disabled={drafting} className="w-full gap-2">
+                    {drafting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    {drafting ? "Drafting…" : subject ? "Re-draft" : "Draft with AI"}
+                    <Badge variant="outline" className="text-[9px] px-1 h-4 ml-1">AI</Badge>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Uses 1 AI call</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
 
             <div className="space-y-1.5">
               <Label className="text-xs uppercase text-muted-foreground">Subject</Label>

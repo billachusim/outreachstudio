@@ -66,6 +66,18 @@ const Intel = () => {
 
   const draftSocial = async (item: IntelItem, platform: "x" | "linkedin" | "instagram") => {
     setDraftingSocial(item.id);
+    // Cache check first — no AI call if a draft already exists
+    const { data: existing } = await supabase
+      .from("social_drafts")
+      .select("id")
+      .eq("intel_item_id", item.id)
+      .eq("platform", platform)
+      .maybeSingle();
+    if (existing) {
+      setDraftingSocial(null);
+      toast.success(`${platform.toUpperCase()} draft already exists — see Social tab`);
+      return;
+    }
     const { data, error } = await supabase.functions.invoke("draft-social-from-intel", {
       body: { intelItemId: item.id, platform },
     });
