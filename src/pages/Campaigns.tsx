@@ -251,7 +251,7 @@ const Campaigns = () => {
                       <Input
                         type="number" min={0} max={500}
                         className="h-8 text-xs"
-                        value={c.email_cap ?? 20}
+                        value={c.email_cap ?? 50}
                         onChange={(e) => updateCampaign(c.id, { email_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
                       />
                     </div>
@@ -260,7 +260,7 @@ const Campaigns = () => {
                       <Input
                         type="number" min={0} max={500}
                         className="h-8 text-xs"
-                        value={c.whatsapp_cap ?? 20}
+                        value={c.whatsapp_cap ?? 50}
                         onChange={(e) => updateCampaign(c.id, { whatsapp_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
                       />
                     </div>
