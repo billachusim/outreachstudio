@@ -251,7 +251,7 @@ const Campaigns = () => {
                       <Input
                         type="number" min={0} max={500}
                         className="h-8 text-xs"
-                        value={c.email_cap ?? 5}
+                        value={c.email_cap ?? 20}
                         onChange={(e) => updateCampaign(c.id, { email_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
                       />
                     </div>
