@@ -458,6 +458,60 @@ export type Database = {
         }
         Relationships: []
       }
+      lead_fetch_runs: {
+        Row: {
+          candidates_seen: number
+          created_at: string
+          credits_estimate: number
+          current_query: string | null
+          enriched_count: number
+          error: string | null
+          hard_ceiling: number
+          high_quality_count: number
+          id: string
+          inserted_count: number
+          queries_planned: number
+          queries_run: number
+          state: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          candidates_seen?: number
+          created_at?: string
+          credits_estimate?: number
+          current_query?: string | null
+          enriched_count?: number
+          error?: string | null
+          hard_ceiling?: number
+          high_quality_count?: number
+          id?: string
+          inserted_count?: number
+          queries_planned?: number
+          queries_run?: number
+          state?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          candidates_seen?: number
+          created_at?: string
+          credits_estimate?: number
+          current_query?: string | null
+          enriched_count?: number
+          error?: string | null
+          hard_ceiling?: number
+          high_quality_count?: number
+          id?: string
+          inserted_count?: number
+          queries_planned?: number
+          queries_run?: number
+          state?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       leads: {
         Row: {
           address: string | null
