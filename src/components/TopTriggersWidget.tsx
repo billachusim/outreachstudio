@@ -16,6 +16,7 @@ type Item = {
   relevance_score: number | null;
   matched_offerings: string[] | null;
   linked_lead_id: string | null;
+  linked_pitch_id: string | null;
 };
 
 export const TopTriggersWidget = () => {
@@ -28,7 +29,7 @@ export const TopTriggersWidget = () => {
     setLoading(true);
     const { data } = await supabase
       .from("intel_items")
-      .select("id, source, title, url, relevance_score, matched_offerings, linked_lead_id")
+      .select("id, source, title, url, relevance_score, matched_offerings, linked_lead_id, linked_pitch_id")
       .eq("acted_on", false)
       .order("relevance_score", { ascending: false })
       .order("created_at", { ascending: false })
@@ -71,7 +72,8 @@ export const TopTriggersWidget = () => {
                   </div>
                   <div className="flex flex-col gap-1.5 shrink-0">
                     <Button size="sm" variant="default" onClick={() => setOpenId(it.id)}>
-                      <Sparkles className="h-3 w-3 mr-1" /> Pitch
+                      {it.linked_pitch_id ? <FileText className="h-3 w-3 mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                      {it.linked_pitch_id ? "Pitch ✓" : "Pitch"}
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => setSocialId(it.id)}>
                       <Megaphone className="h-3 w-3 mr-1" /> Post
