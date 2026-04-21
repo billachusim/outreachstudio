@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Pause, Play, Activity, Send, Sparkles, Sun, RefreshCw, Eye, MailOpen, Reply, AlertTriangle, X } from "lucide-react";
+import { Pause, Play, Activity, Send, Sparkles, Sun, RefreshCw, Eye, MailOpen, Reply, AlertTriangle, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { TopTriggersWidget } from "@/components/TopTriggersWidget";
 import {
@@ -243,7 +243,7 @@ const Dashboard = () => {
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" title="End run">
-                            <X className="h-3.5 w-3.5" />
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
