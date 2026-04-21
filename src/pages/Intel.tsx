@@ -34,6 +34,7 @@ const Intel = () => {
   const [scanning, setScanning] = useState(false);
   const [pitchOpen, setPitchOpen] = useState<IntelItem | null>(null);
   const [leadOpen, setLeadOpen] = useState<IntelItem | null>(null);
+  const [launchOpen, setLaunchOpen] = useState<IntelItem | null>(null);
   const [draftingSocial, setDraftingSocial] = useState<string | null>(null);
 
   const load = async () => {
@@ -158,6 +159,9 @@ const Intel = () => {
                   <Button size="sm" onClick={() => setPitchOpen(it)}>
                     <Sparkles className="h-3.5 w-3.5 mr-1.5" /> Draft pitch
                   </Button>
+                  <Button size="sm" variant="default" className="bg-primary" onClick={() => setLaunchOpen(it)}>
+                    <Rocket className="h-3.5 w-3.5 mr-1.5" /> Launch campaign
+                  </Button>
                   {!it.linked_lead_id && (
                     <Button size="sm" variant="outline" onClick={() => setLeadOpen(it)}>
                       <UserPlus className="h-3.5 w-3.5 mr-1.5" /> Create lead
@@ -202,6 +206,12 @@ const Intel = () => {
         intelTitle={leadOpen?.title}
         intelUrl={leadOpen?.url ?? null}
         onCreated={() => load()}
+      />
+      <IntelLaunchCampaignDrawer
+        open={!!launchOpen}
+        onOpenChange={(v) => { if (!v) { setLaunchOpen(null); load(); } }}
+        intelItemId={launchOpen?.id ?? null}
+        intelTitle={launchOpen?.title}
       />
     </div>
   );
