@@ -442,7 +442,7 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
           try {
             const { data: lead } = await supabase.from("leads").select("*").eq("id", id).maybeSingle();
             if (!lead || !lead.website) return;
-            const scrape = await firecrawlScrape(firecrawlKey, lead.website, location);
+            const scrape = await firecrawlScrape(firecrawlKey, lead.website, scrapeLocation);
             creditsEstimate += 1;
             if (!scrape) return;
             const updates = await buildEnrichmentUpdates(lovableKey, lead as any, scrape);
