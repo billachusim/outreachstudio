@@ -1,8 +1,13 @@
 // Discovers leads for a campaign using Firecrawl search.
 // Inserts up to `limit` new leads (deduped by website) into the leads table.
-// Returns count + a list of skipped/found details.
+// Region-anchored: biases search toward the user's outreach_region/country.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  buildRegionalQuery,
+  fetchUserRegion,
+  firecrawlLocationParam,
+} from "../_shared/enrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -85,13 +90,16 @@ Deno.serve(async (req) => {
     if (cerr) return json(500, { error: cerr.message });
     if (!campaign) return json(404, { error: "Campaign not found" });
 
-    // Build search query from campaign metadata
+    // Build search query from campaign metadata, biased to user's region.
+    const region = await fetchUserRegion(supabase, user.id);
     const parts: string[] = [];
     if (campaign.category) parts.push(campaign.category);
     if (campaign.keywords) parts.push(campaign.keywords);
     if (campaign.city) parts.push(`in ${campaign.city}`);
+    else parts.push(`in ${region.region}`);
     if (parts.length === 0) parts.push(campaign.name);
-    const query = parts.join(" ");
+    const baseQuery = parts.join(" ");
+    const query = buildRegionalQuery(baseQuery, region);
 
     const searchRes = await fetch(`${FIRECRAWL_V2}/search`, {
       method: "POST",
@@ -102,6 +110,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         query,
         limit: Math.min(Math.max(limit, 1), 20),
+        location: firecrawlLocationParam(region),
       }),
     });
     const searchJson = await searchRes.json();
