@@ -267,6 +267,11 @@ const ProgressDetail = ({ run, pct, onStop, hideStop }: { run: FetchRun; pct: nu
               <span className="font-medium text-foreground">Now:</span> {run.current_query}
             </p>
           )}
+          {run.aggregators_exploded > 0 && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Mining lists:</span> exploded {run.aggregators_exploded} page{run.aggregators_exploded === 1 ? "" : "s"} → {run.extracted_businesses} business{run.extracted_businesses === 1 ? "" : "es"}
+            </p>
+          )}
         </>
       )}
       <div className="grid grid-cols-2 gap-2 text-xs">
