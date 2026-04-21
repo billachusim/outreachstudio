@@ -1,62 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Sparkles, MessageCircle } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, Trash2, Sparkles, MessageCircle, LayoutGrid, List, Search, Mail, Phone, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PitchDrawer } from "@/components/PitchDrawer";
 import { BulkDraftBar } from "@/components/BulkDraftBar";
-import { Checkbox } from "@/components/ui/checkbox";
+import { LeadDetailDrawer, type LeadDetail } from "@/components/LeadDetailDrawer";
+import { LeadCard } from "@/components/LeadCard";
 
 type LeadStatus = "new" | "enriched" | "drafted" | "sent" | "opened" | "replied" | "won" | "lost";
-type Lead = {
-  id: string;
-  business_name: string;
-  website: string | null;
-  phone: string | null;
-  contact_email: string | null;
-  contact_name: string | null;
-  address: string | null;
-  status: LeadStatus;
-  notes: string | null;
-  campaign_id: string | null;
-  score: number | null;
-  last_activity_at: string | null;
-  reply_intent: string | null;
-};
+const STATUSES: LeadStatus[] = ["new", "enriched", "drafted", "sent", "opened", "replied", "won", "lost"];
 
 type Campaign = { id: string; name: string };
-
-const STATUSES: LeadStatus[] = ["new", "enriched", "drafted", "sent", "opened", "replied", "won", "lost"];
 
 const statusVariant: Record<LeadStatus, string> = {
   new: "bg-muted text-muted-foreground",
@@ -69,47 +36,91 @@ const statusVariant: Record<LeadStatus, string> = {
   lost: "bg-destructive/10 text-destructive",
 };
 
+type TabKey = "all" | "hot" | "ready" | "needs" | "replied" | "won";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "hot", label: "🔥 Hot" },
+  { key: "ready", label: "✉ Ready" },
+  { key: "needs", label: "⏳ Needs enrichment" },
+  { key: "replied", label: "💬 Replied" },
+  { key: "won", label: "🏆 Won" },
+];
+
 const Leads = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const campaignFilter = params.get("campaign");
 
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const [leads, setLeads] = useState<LeadDetail[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [region, setRegion] = useState("Nigeria");
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Partial<Lead>>({ business_name: "", status: "new" });
-  const [pitchLead, setPitchLead] = useState<Lead | null>(null);
+  const [draft, setDraft] = useState<Partial<LeadDetail>>({ business_name: "", status: "new" });
+  const [pitchLead, setPitchLead] = useState<LeadDetail | null>(null);
   const [pitchOpen, setPitchOpen] = useState(false);
+  const [detailLead, setDetailLead] = useState<LeadDetail | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  const toggleOne = (id: string) => {
-    setSelected((s) => {
-      const next = new Set(s);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const toggleAll = () => {
-    setSelected((s) => (s.size === leads.length ? new Set() : new Set(leads.map((l) => l.id))));
-  };
-  const clearSelection = () => setSelected(new Set());
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [minScore, setMinScore] = useState<number>(0);
+  const [view, setView] = useState<"table" | "cards">(() => {
+    if (typeof window === "undefined") return "table";
+    return (localStorage.getItem("leads:view") as any) || (window.innerWidth < 640 ? "cards" : "table");
+  });
+  const [tab, setTab] = useState<TabKey>(() =>
+    typeof window === "undefined" ? "all" : ((localStorage.getItem("leads:tab") as TabKey) || "all"),
+  );
 
   useEffect(() => { document.title = "Leads · Outreach Studio"; }, []);
+  useEffect(() => { localStorage.setItem("leads:view", view); }, [view]);
+  useEffect(() => { localStorage.setItem("leads:tab", tab); }, [tab]);
 
   const load = async () => {
-    const [{ data: cs }, leadsRes] = await Promise.all([
+    if (!user) return;
+    const [{ data: cs }, leadsRes, { data: prof }] = await Promise.all([
       supabase.from("campaigns").select("id,name").order("name"),
       campaignFilter
         ? supabase.from("leads").select("*").eq("campaign_id", campaignFilter).order("score", { ascending: false }).order("created_at", { ascending: false })
         : supabase.from("leads").select("*").order("score", { ascending: false }).order("created_at", { ascending: false }),
+      supabase.from("profiles").select("outreach_region").eq("user_id", user.id).maybeSingle(),
     ]);
     setCampaigns((cs as Campaign[]) ?? []);
-    setLeads((leadsRes.data as Lead[]) ?? []);
+    setLeads((leadsRes.data as LeadDetail[]) ?? []);
+    if (prof) setRegion((prof as any).outreach_region || "Nigeria");
   };
 
   useEffect(() => { if (user) load(); }, [user?.id, campaignFilter]);
+
+  const counters = useMemo(() => {
+    const total = leads.length;
+    const hot = leads.filter((l) => (l.score ?? 0) >= 70).length;
+    const ready = leads.filter((l) => l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status)).length;
+    const needs = leads.filter((l) => !l.contact_email && !l.phone).length;
+    return { total, hot, ready, needs };
+  }, [leads]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return leads.filter((l) => {
+      if (q && !`${l.business_name} ${l.contact_email ?? ""} ${l.contact_name ?? ""} ${l.website ?? ""}`.toLowerCase().includes(q)) return false;
+      if (statusFilter !== "all" && l.status !== statusFilter) return false;
+      if ((l.score ?? 0) < minScore) return false;
+      switch (tab) {
+        case "hot": return (l.score ?? 0) >= 70;
+        case "ready": return !!l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status);
+        case "needs": return !l.contact_email && !l.phone;
+        case "replied": return l.status === "replied";
+        case "won": return l.status === "won";
+        default: return true;
+      }
+    });
+  }, [leads, search, statusFilter, minScore, tab]);
+
+  const toggleOne = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => setSelected((s) => (s.size === filtered.length ? new Set() : new Set(filtered.map((l) => l.id))));
 
   const handleCreate = async () => {
     if (!user || !draft.business_name?.trim()) return;
@@ -144,94 +155,51 @@ const Leads = () => {
     load();
   };
 
-  const sendWhatsApp = async (lead: Lead) => {
-    if (!lead.phone) return toast({ title: "No phone", description: "Add a phone number to this lead first.", variant: "destructive" });
-    const body = window.prompt(`WhatsApp message to ${lead.business_name} (${lead.phone}):`, "");
+  const sendWhatsApp = async (lead: LeadDetail) => {
+    if (!lead.phone) return toast({ title: "No phone", description: "Add a phone number first.", variant: "destructive" });
+    const body = window.prompt(`WhatsApp ${lead.business_name} (${lead.phone}):`, "");
     if (!body?.trim()) return;
     const { data, error } = await supabase.functions.invoke("send-whatsapp", { body: { leadId: lead.id, body } });
-    if (error || (data && data.error)) {
-      return toast({ title: "WhatsApp failed", description: error?.message || data?.error, variant: "destructive" });
-    }
-    toast({ title: "WhatsApp sent", description: `Delivered to ${lead.phone}` });
+    if (error || (data && (data as any).error)) return toast({ title: "WhatsApp failed", description: error?.message || (data as any)?.error, variant: "destructive" });
+    toast({ title: "WhatsApp sent" });
     load();
   };
 
+  const openDetail = (lead: LeadDetail) => { setDetailLead(lead); setDetailOpen(true); };
+  const openDraft = (lead: LeadDetail) => { setPitchLead(lead); setPitchOpen(true); };
+
   return (
-    <div className="container mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="container mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
+      {/* Header + counters */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold sm:text-2xl">Leads</h1>
-          <p className="text-sm text-muted-foreground">Manage prospects and move them through the pipeline.</p>
+          <p className="text-sm text-muted-foreground">
+            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready to send</span> · {counters.needs} need enrichment
+          </p>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          <Select
-            value={campaignFilter ?? "all"}
-            onValueChange={(v) => {
-              if (v === "all") setParams({});
-              else setParams({ campaign: v });
-            }}
-          >
-            <SelectTrigger className="flex-1 sm:w-[200px] sm:flex-none"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All campaigns</SelectItem>
-              {campaigns.map((c) => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="gap-1"><Globe className="h-3 w-3" />Region: {region}</Badge>
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> Add lead</Button>
-            </DialogTrigger>
+            <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4" /> Add lead</Button></DialogTrigger>
             <DialogContent className="max-h-[85vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Add lead</DialogTitle>
-              </DialogHeader>
+              <DialogHeader><DialogTitle>Add lead</DialogTitle></DialogHeader>
               <div className="grid gap-4">
-                <div className="space-y-1.5">
-                  <Label>Business name</Label>
-                  <Input value={draft.business_name ?? ""} onChange={(e) => setDraft({ ...draft, business_name: e.target.value })} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Campaign</Label>
-                  <Select
-                    value={draft.campaign_id ?? campaignFilter ?? undefined}
-                    onValueChange={(v) => setDraft({ ...draft, campaign_id: v })}
-                  >
+                <div className="space-y-1.5"><Label>Business name</Label><Input value={draft.business_name ?? ""} onChange={(e) => setDraft({ ...draft, business_name: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Campaign</Label>
+                  <Select value={draft.campaign_id ?? campaignFilter ?? undefined} onValueChange={(v) => setDraft({ ...draft, campaign_id: v })}>
                     <SelectTrigger><SelectValue placeholder="Select campaign" /></SelectTrigger>
-                    <SelectContent>
-                      {campaigns.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
+                    <SelectContent>{campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>Website</Label>
-                    <Input value={draft.website ?? ""} onChange={(e) => setDraft({ ...draft, website: e.target.value })} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Phone</Label>
-                    <Input value={draft.phone ?? ""} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Contact name</Label>
-                    <Input value={draft.contact_name ?? ""} onChange={(e) => setDraft({ ...draft, contact_name: e.target.value })} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Contact email</Label>
-                    <Input type="email" value={draft.contact_email ?? ""} onChange={(e) => setDraft({ ...draft, contact_email: e.target.value })} />
-                  </div>
+                  <div className="space-y-1.5"><Label>Website</Label><Input value={draft.website ?? ""} onChange={(e) => setDraft({ ...draft, website: e.target.value })} /></div>
+                  <div className="space-y-1.5"><Label>Phone</Label><Input value={draft.phone ?? ""} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></div>
+                  <div className="space-y-1.5"><Label>Contact name</Label><Input value={draft.contact_name ?? ""} onChange={(e) => setDraft({ ...draft, contact_name: e.target.value })} /></div>
+                  <div className="space-y-1.5"><Label>Contact email</Label><Input type="email" value={draft.contact_email ?? ""} onChange={(e) => setDraft({ ...draft, contact_email: e.target.value })} /></div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Address</Label>
-                  <Input value={draft.address ?? ""} onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Notes</Label>
-                  <Textarea rows={3} value={draft.notes ?? ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} />
-                </div>
+                <div className="space-y-1.5"><Label>Address</Label><Input value={draft.address ?? ""} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Notes</Label><Textarea rows={3} value={draft.notes ?? ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -242,127 +210,138 @@ const Leads = () => {
         </div>
       </div>
 
-      <BulkDraftBar
-        selectedIds={Array.from(selected)}
-        onClear={clearSelection}
-        onComplete={() => { clearSelection(); load(); }}
-      />
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, domain…" className="pl-9" />
+        </div>
+        <Select value={campaignFilter ?? "all"} onValueChange={(v) => v === "all" ? setParams({}) : setParams({ campaign: v })}>
+          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Campaign" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All campaigns</SelectItem>
+            {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All status</SelectItem>
+            {STATUSES.map((s) => <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={String(minScore)} onValueChange={(v) => setMinScore(Number(v))}>
+          <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">Score ≥ 0</SelectItem>
+            <SelectItem value="40">Score ≥ 40</SelectItem>
+            <SelectItem value="60">Score ≥ 60</SelectItem>
+            <SelectItem value="70">Score ≥ 70</SelectItem>
+            <SelectItem value="80">Score ≥ 80</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="ml-auto flex gap-1 rounded-md border p-0.5">
+          <Button size="sm" variant={view === "table" ? "secondary" : "ghost"} onClick={() => setView("table")} className="h-7 px-2"><List className="h-4 w-4" /></Button>
+          <Button size="sm" variant={view === "cards" ? "secondary" : "ghost"} onClick={() => setView("cards")} className="h-7 px-2"><LayoutGrid className="h-4 w-4" /></Button>
+        </div>
+      </div>
 
-      {leads.length === 0 ? (
+      {/* Tabs */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
+        <TabsList className="flex-wrap h-auto">
+          {TABS.map((t) => <TabsTrigger key={t.key} value={t.key} className="text-xs sm:text-sm">{t.label}</TabsTrigger>)}
+        </TabsList>
+      </Tabs>
+
+      <BulkDraftBar selectedIds={Array.from(selected)} onClear={() => setSelected(new Set())} onComplete={() => { setSelected(new Set()); load(); }} />
+
+      {filtered.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center text-muted-foreground">
-            No leads yet. Add one manually — auto-discovery comes in the next phase.
+            {leads.length === 0
+              ? "No leads yet. Launch a campaign or add one manually."
+              : `No leads match this view.`}
           </CardContent>
         </Card>
+      ) : view === "cards" ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((l) => (
+            <LeadCard key={l.id} lead={l} selected={selected.has(l.id)} onSelect={() => toggleOne(l.id)} onClick={() => openDetail(l)} />
+          ))}
+        </div>
       ) : (
         <Card className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={selected.size > 0 && selected.size === leads.length}
-                    onCheckedChange={toggleAll}
-                    aria-label="Select all"
-                  />
-                </TableHead>
-                <TableHead>Business</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Website</TableHead>
+                <TableHead className="w-10"><Checkbox checked={selected.size > 0 && selected.size === filtered.length} onCheckedChange={toggleAll} /></TableHead>
+                <TableHead>Lead</TableHead>
                 <TableHead className="w-20">Score</TableHead>
+                <TableHead>Channels</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-24 text-right">Actions</TableHead>
+                <TableHead className="w-28 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {leads.map((l) => (
-                <TableRow key={l.id} data-state={selected.has(l.id) ? "selected" : undefined}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selected.has(l.id)}
-                      onCheckedChange={() => toggleOne(l.id)}
-                      aria-label={`Select ${l.business_name}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{l.business_name}</div>
-                    {l.address && <div className="text-xs text-muted-foreground">{l.address}</div>}
-                  </TableCell>
-                  <TableCell>
-                    {l.contact_name && <div className="text-sm">{l.contact_name}</div>}
-                    {l.contact_email && <div className="text-xs text-muted-foreground">{l.contact_email}</div>}
-                    {l.phone && <div className="text-xs text-muted-foreground">{l.phone}</div>}
-                  </TableCell>
-                  <TableCell>
-                    {l.website && (
-                      <a href={l.website.startsWith("http") ? l.website : `https://${l.website}`} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
-                        {l.website.replace(/^https?:\/\//, "")}
-                      </a>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col items-start gap-0.5">
-                      <Badge
-                        variant="outline"
-                        className={
-                          (l.score ?? 0) >= 70
-                            ? "border-success/50 text-success"
-                            : (l.score ?? 0) >= 40
-                              ? "border-primary/50 text-primary"
-                              : "text-muted-foreground"
-                        }
-                      >
-                        {l.score ?? 0}
-                      </Badge>
-                      {l.reply_intent && (
-                        <span className="text-[10px] capitalize text-muted-foreground">{l.reply_intent}</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Select value={l.status} onValueChange={(v) => updateStatus(l.id, v as LeadStatus)}>
-                      <SelectTrigger className="h-8 w-[130px] border-0 bg-transparent p-0">
-                        <Badge className={statusVariant[l.status] + " capitalize"}>{l.status}</Badge>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STATUSES.map((s) => (
-                          <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Draft pitch"
-                        onClick={() => { setPitchLead(l); setPitchOpen(true); }}
-                      >
-                        <Sparkles className="h-4 w-4" />
-                      </Button>
-                      {l.phone && (
-                        <Button variant="ghost" size="icon" title="Send WhatsApp" onClick={() => sendWhatsApp(l)}>
-                          <MessageCircle className="h-4 w-4" />
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(l.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {filtered.map((l) => {
+                const score = l.score ?? 0;
+                const scoreColor = score >= 70 ? "border-success/50 text-success" : score >= 40 ? "border-primary/50 text-primary" : "text-muted-foreground";
+                return (
+                  <TableRow key={l.id} data-state={selected.has(l.id) ? "selected" : undefined} className="cursor-pointer" onClick={() => openDetail(l)}>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Checkbox checked={selected.has(l.id)} onCheckedChange={() => toggleOne(l.id)} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium">{l.business_name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {l.contact_name && <span>{l.contact_name} · </span>}
+                        {l.website && <span>{l.website.replace(/^https?:\/\//, "")}</span>}
+                      </div>
+                      {l.enrichment_summary && <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground/80">{l.enrichment_summary}</div>}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={scoreColor}>{score}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        {l.contact_email && <Mail className="h-3.5 w-3.5 text-success" />}
+                        {l.phone && <Phone className="h-3.5 w-3.5 text-success" />}
+                        {(l.linkedin_url || l.instagram_url || l.facebook_url || l.x_url) && <Globe className="h-3.5 w-3.5 text-muted-foreground" />}
+                      </div>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Select value={l.status} onValueChange={(v) => updateStatus(l.id, v as LeadStatus)}>
+                        <SelectTrigger className="h-8 w-[120px] border-0 bg-transparent p-0">
+                          <Badge className={statusVariant[l.status as LeadStatus] + " capitalize"}>{l.status}</Badge>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STATUSES.map((s) => <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" title="Draft pitch" onClick={() => openDraft(l)}><Sparkles className="h-4 w-4" /></Button>
+                        {l.phone && <Button variant="ghost" size="icon" title="WhatsApp" onClick={() => sendWhatsApp(l)}><MessageCircle className="h-4 w-4" /></Button>}
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(l.id)}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </Card>
       )}
 
-      <PitchDrawer
-        lead={pitchLead}
-        open={pitchOpen}
-        onOpenChange={setPitchOpen}
-        onSaved={load}
+      <PitchDrawer lead={pitchLead as any} open={pitchOpen} onOpenChange={setPitchOpen} onSaved={load} />
+      <LeadDetailDrawer
+        lead={detailLead}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onDraftPitch={(l) => { setDetailOpen(false); openDraft(l); }}
+        onWhatsApp={(l) => { setDetailOpen(false); sendWhatsApp(l); }}
+        onChanged={load}
       />
     </div>
   );
