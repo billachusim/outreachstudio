@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Newspaper, Sparkles, ExternalLink, Megaphone, FileText, Rocket } from "lucide-react";
+import { Newspaper, Sparkles, ExternalLink, Megaphone, FileText, Rocket, BarChart3, Zap } from "lucide-react";
 import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
 import { IntelSocialDrawer } from "@/components/IntelSocialDrawer";
 import { IntelLaunchCampaignDrawer } from "@/components/IntelLaunchCampaignDrawer";
@@ -18,7 +18,10 @@ type Item = {
   matched_offerings: string[] | null;
   linked_lead_id: string | null;
   linked_pitch_id: string | null;
+  spawned_campaign_id: string | null;
 };
+
+type RunProgress = { leads_sent: number; leads_found: number; target_lead_count: number; state: string };
 
 export const TopTriggersWidget = () => {
   const [items, setItems] = useState<Item[]>([]);
