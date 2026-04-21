@@ -829,6 +829,103 @@ async function runFetch(
       return;
     }
 
+    // 5b. Auto-promote aggregator hosts that produced ≥3 high-quality leads.
+    let promotedSourcesCount = 0;
+    const promotedHosts: string[] = [];
+    if (hostStats.size > 0) {
+      try {
+        // Final scores per inserted lead from each host.
+        const hostQualityCounts = new Map<string, number>();
+        for (const [host, stat] of hostStats.entries()) {
+          if (stat.insertedLeadIds.length === 0) continue;
+          const { data: scored } = await supabase
+            .from("leads")
+            .select("id,score")
+            .in("id", stat.insertedLeadIds);
+          const hq = (scored ?? []).filter((r: any) => (r.score ?? 0) >= 50).length;
+          hostQualityCounts.set(host, hq);
+        }
+
+        // Upsert aggregator_performance rows.
+        for (const [host, stat] of hostStats.entries()) {
+          if (isBlockedHost(host)) continue; // safety: never promote social/marketplaces
+          const hq = hostQualityCounts.get(host) ?? 0;
+          const { data: existing } = await supabase
+            .from("aggregator_performance")
+            .select("id,total_extracted,total_high_quality,promoted_to_intel")
+            .eq("user_id", userId)
+            .eq("host", host)
+            .maybeSingle();
+
+          if (existing) {
+            await supabase.from("aggregator_performance").update({
+              total_extracted: (existing.total_extracted ?? 0) + stat.extracted,
+              total_high_quality: (existing.total_high_quality ?? 0) + hq,
+              source_url: stat.sourceUrl,
+              last_seen_at: new Date().toISOString(),
+            }).eq("id", existing.id);
+          } else {
+            await supabase.from("aggregator_performance").insert({
+              user_id: userId,
+              host,
+              source_url: stat.sourceUrl,
+              total_extracted: stat.extracted,
+              total_high_quality: hq,
+            });
+          }
+        }
+
+        // Promotion pass: any host now ≥3 quality and not yet promoted, not in DEFAULT_SOURCES,
+        // not in user's intel_sources → insert into intel_sources with auto_promoted=true.
+        const DEFAULT_SOURCE_HOSTS = ["techcabal.com", "techpoint.africa", "businessday.ng"];
+        const { data: candidates } = await supabase
+          .from("aggregator_performance")
+          .select("id,host,source_url")
+          .eq("user_id", userId)
+          .eq("promoted_to_intel", false)
+          .gte("total_high_quality", 3);
+
+        if (candidates && candidates.length > 0) {
+          const { data: existingSources } = await supabase
+            .from("intel_sources")
+            .select("url")
+            .eq("user_id", userId);
+          const existingHosts = new Set(
+            (existingSources ?? []).map((s: any) => rootDomain(s.url)).filter(Boolean) as string[],
+          );
+
+          for (const cand of candidates) {
+            const host = cand.host as string;
+            if (isBlockedHost(host)) continue;
+            if (DEFAULT_SOURCE_HOSTS.includes(host)) continue;
+            if (existingHosts.has(host)) continue;
+
+            const niceName = host.split(".")[0].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+            const { error: insSrcErr } = await supabase.from("intel_sources").insert({
+              user_id: userId,
+              name: niceName,
+              url: `https://${host}/`,
+              enabled: true,
+              auto_promoted: true,
+            });
+            if (insSrcErr) {
+              log(`Auto-promote insert failed for ${host}: ${insSrcErr.message}`, "warn");
+              continue;
+            }
+            await supabase.from("aggregator_performance").update({
+              promoted_to_intel: true,
+              promoted_at: new Date().toISOString(),
+            }).eq("id", cand.id);
+            promotedSourcesCount += 1;
+            promotedHosts.push(host);
+            log(`Auto-added intel source: ${host} (3+ quality leads from listicles)`);
+          }
+        }
+      } catch (e) {
+        log(`Auto-promotion check failed: ${e instanceof Error ? e.message : String(e)}`, "warn");
+      }
+    }
+
     // Compose failure_reason if zero leads inserted
     let failureReason: string | null = null;
     if (totalInserted === 0) {
@@ -850,8 +947,13 @@ async function runFetch(
       failure_reason: failureReason,
       aggregators_exploded: aggregatorsExploded,
       extracted_businesses: extractedBusinesses,
+      promoted_sources_count: promotedSourcesCount,
     });
-    log(`✓ Done — ${totalInserted} leads inserted, ~${creditsEstimate} credits used`);
+    if (promotedSourcesCount > 0) {
+      log(`✓ Done — ${totalInserted} leads, ~${creditsEstimate} credits, promoted ${promotedSourcesCount} new intel source(s): ${promotedHosts.join(", ")}`);
+    } else {
+      log(`✓ Done — ${totalInserted} leads inserted, ~${creditsEstimate} credits used`);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`fetch-leads ${runId} failed`, e);
