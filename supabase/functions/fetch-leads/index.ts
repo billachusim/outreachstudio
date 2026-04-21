@@ -23,10 +23,13 @@ const corsHeaders = {
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const LOVABLE_AI = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
-const HARD_CEILING = 200;
+const DEFAULT_HARD_CEILING = 200;
+const DEFAULT_MAX_RETRIES = 4; // fallback variants per query
 const QUERY_RESULTS = 20;
 const MAX_CONCURRENT = 4;
 const ENRICH_TOP_N = 25;
+const SEARCH_CREDIT_PER_CALL = 1;
+const SCRAPE_CREDIT_PER_CALL = 1;
 
 const HOST_BLOCKLIST = [
   "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
@@ -217,30 +220,33 @@ async function firecrawlSearch(
 }
 
 // Robust search: tries regional → without location → bare query.
-// Returns the first non-empty result set (or last attempt's result).
+// `maxAttempts` caps retries (1 = primary only, 4 = full fallback chain).
 async function robustSearch(
   apiKey: string,
   baseQuery: string,
   region: RegionContext,
   location: string,
-): Promise<{ results: FirecrawlHit[]; outOfCredits: boolean; attempts: number }> {
+  maxAttempts: number,
+): Promise<{ results: FirecrawlHit[]; outOfCredits: boolean; attempts: number; lastError?: string }> {
   const regional = buildAfricanRegionalQuery(baseQuery, region);
   const variants: Array<{ q: string; loc: string | null }> = [
-    { q: regional, loc: location },        // 1. AI-enhanced + region location
-    { q: regional, loc: null },            // 2. AI-enhanced, no location
-    { q: baseQuery, loc: location },       // 3. Bare query + region
-    { q: baseQuery, loc: null },           // 4. Bare query, no location
-  ];
+    { q: regional, loc: location },
+    { q: regional, loc: null },
+    { q: baseQuery, loc: location },
+    { q: baseQuery, loc: null },
+  ].slice(0, Math.max(1, Math.min(maxAttempts, 4)));
   let attempts = 0;
   let lastResults: FirecrawlHit[] = [];
+  let lastError: string | undefined;
   for (const v of variants) {
     attempts += 1;
     const r = await firecrawlSearch(apiKey, v.q, v.loc);
-    if (r.outOfCredits) return { results: [], outOfCredits: true, attempts };
+    if (r.outOfCredits) return { results: [], outOfCredits: true, attempts, lastError: "Firecrawl 402" };
+    if (r.status >= 400) lastError = `Firecrawl ${r.status}`;
     if (r.results.length > 0) return { results: r.results, outOfCredits: false, attempts };
     lastResults = r.results;
   }
-  return { results: lastResults, outOfCredits: false, attempts };
+  return { results: lastResults, outOfCredits: false, attempts, lastError };
 }
 
 async function firecrawlScrape(apiKey: string, url: string, location: ReturnType<typeof firecrawlScrapeLocation>) {
@@ -263,7 +269,15 @@ async function firecrawlScrape(apiKey: string, url: string, location: ReturnType
   };
 }
 
-async function runFetch(supabase: any, runId: string, userId: string, firecrawlKey: string, lovableKey: string) {
+async function runFetch(
+  supabase: any,
+  runId: string,
+  userId: string,
+  firecrawlKey: string,
+  lovableKey: string,
+  hardCeiling: number,
+  maxRetries: number,
+) {
   const log = (msg: string, level: "info" | "warn" | "error" = "info") => {
     console.log(`[fetch-leads ${runId}] ${msg}`);
     supabase.from("run_events").insert({
@@ -332,22 +346,30 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
     let totalQueriesRun = 0;
     const candidatesForEnrichment: { id: string; signal: number }[] = [];
 
-    const MIN_TARGET = 30; // if we end below this, run a fallback round
+    const MIN_TARGET = 30;
     const FALLBACK_QUERY_BUDGET = 6;
+    let totalAttempts = 0;
+    let totalRetries = 0;
+    let lastSearchError: string | undefined;
 
     const processBatch = async (batch: PlannedQuery[]): Promise<{ outOfCredits: boolean; batchInserted: number }> => {
       await update({ current_query: batch[0].icp });
 
       const results = await Promise.all(
         batch.map(async (q) => {
-          const r = await robustSearch(firecrawlKey, q.query, region, searchLocation);
+          const r = await robustSearch(firecrawlKey, q.query, region, searchLocation, maxRetries);
           return { q, ...r };
         }),
       );
 
       const batchAttempts = results.reduce((s, r) => s + r.attempts, 0);
-      creditsEstimate += batchAttempts;
+      const batchRetries = results.reduce((s, r) => s + Math.max(0, r.attempts - 1), 0);
+      totalAttempts += batchAttempts;
+      totalRetries += batchRetries;
+      creditsEstimate += batchAttempts * SEARCH_CREDIT_PER_CALL;
       totalQueriesRun += batch.length;
+      const lastErr = results.find((r) => r.lastError)?.lastError;
+      if (lastErr) lastSearchError = lastErr;
 
       let outOfCredits = false;
       const newLeads: any[] = [];
@@ -357,7 +379,7 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
         totalSeen += hits.length;
 
         for (const hit of hits) {
-          if (totalInserted + newLeads.length >= HARD_CEILING) break;
+          if (totalInserted + newLeads.length >= hardCeiling) break;
           const host = rootDomain(hit.url);
           if (!host) continue;
           if (isBlockedHost(host)) continue;
@@ -405,6 +427,8 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
           const { data: cur } = await supabase.from("lead_fetch_runs").select("high_quality_count").eq("id", runId).maybeSingle();
           await update({
             queries_run: totalQueriesRun,
+            query_attempts: totalAttempts,
+            retries_used: totalRetries,
             candidates_seen: totalSeen,
             inserted_count: totalInserted,
             high_quality_count: (cur?.high_quality_count ?? 0) + hq,
@@ -414,6 +438,8 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
       } else {
         await update({
           queries_run: totalQueriesRun,
+          query_attempts: totalAttempts,
+          retries_used: totalRetries,
           candidates_seen: totalSeen,
           credits_estimate: creditsEstimate,
         });
@@ -429,8 +455,8 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
         await update({ state: "stopped" });
         return;
       }
-      if (totalInserted >= HARD_CEILING) {
-        log(`Hit hard ceiling of ${HARD_CEILING} leads — stopping searches`);
+      if (totalInserted >= hardCeiling) {
+        log(`Hit hard ceiling of ${hardCeiling} leads — stopping searches`);
         break;
       }
 
@@ -439,7 +465,7 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
 
       if (outOfCredits) {
         log("Firecrawl credits exhausted", "error");
-        await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue" });
+        await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue", failure_reason: "Firecrawl credits exhausted — top up to continue" });
         return;
       }
     }
@@ -447,18 +473,18 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
     log(`Initial pass — ${totalInserted} inserted from ${totalSeen} candidates`);
 
     // 4b. Persistence: if we ended up with too few leads, run broader fallback queries.
-    if (totalInserted < MIN_TARGET && !(await checkStopped()) && totalInserted < HARD_CEILING) {
+    if (totalInserted < MIN_TARGET && !(await checkStopped()) && totalInserted < hardCeiling) {
       log(`Below target (${totalInserted}/${MIN_TARGET}) — running ${FALLBACK_QUERY_BUDGET} fallback queries`);
       const fallback = buildFallbackQueries(region, (offRes.data ?? []) as any).slice(0, FALLBACK_QUERY_BUDGET);
       await update({ queries_planned: planned.length + fallback.length });
 
       for (let i = 0; i < fallback.length; i += MAX_CONCURRENT) {
         if (await checkStopped()) break;
-        if (totalInserted >= HARD_CEILING) break;
+        if (totalInserted >= hardCeiling) break;
         const batch = fallback.slice(i, i + MAX_CONCURRENT);
         const { outOfCredits } = await processBatch(batch);
         if (outOfCredits) {
-          await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue" });
+          await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue", failure_reason: "Firecrawl credits exhausted" });
           return;
         }
       }
@@ -475,7 +501,6 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
 
       let enriched = 0;
       let highQuality = 0;
-      // Run enrichments with light concurrency to avoid timeouts
       for (let i = 0; i < top.length; i += 3) {
         if (await checkStopped()) break;
         const slice = top.slice(i, i + 3);
@@ -484,7 +509,7 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
             const { data: lead } = await supabase.from("leads").select("*").eq("id", id).maybeSingle();
             if (!lead || !lead.website) return;
             const scrape = await firecrawlScrape(firecrawlKey, lead.website, scrapeLocation);
-            creditsEstimate += 1;
+            creditsEstimate += SCRAPE_CREDIT_PER_CALL;
             if (!scrape) return;
             const updates = await buildEnrichmentUpdates(lovableKey, lead as any, scrape);
             const newStatus = updates.contact_email || updates.phone ? "enriched" : lead.status;
@@ -511,12 +536,23 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
       return;
     }
 
-    await update({ state: "done" });
+    // Compose failure_reason if zero leads inserted
+    let failureReason: string | null = null;
+    if (totalInserted === 0) {
+      const parts: string[] = [];
+      if (totalSeen === 0) parts.push("No search results returned by Firecrawl across all queries and fallback variants.");
+      else parts.push(`${totalSeen} candidates returned but all were filtered (blocklisted hosts, excluded TLDs, or duplicates of existing leads).`);
+      if (lastSearchError) parts.push(`Last search error: ${lastSearchError}.`);
+      parts.push(`Try widening offerings/keywords, raising max retries (current: ${maxRetries}), or checking Firecrawl quota.`);
+      failureReason = parts.join(" ");
+    }
+
+    await update({ state: "done", failure_reason: failureReason });
     log(`✓ Done — ${totalInserted} leads inserted, ~${creditsEstimate} credits used`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`fetch-leads ${runId} failed`, e);
-    await supabase.from("lead_fetch_runs").update({ state: "failed", error: msg.slice(0, 500) }).eq("id", runId);
+    await supabase.from("lead_fetch_runs").update({ state: "failed", error: msg.slice(0, 500), failure_reason: msg.slice(0, 500) }).eq("id", runId);
     supabase.from("run_events").insert({
       user_id: userId,
       kind: "fetch_leads",
@@ -558,17 +594,23 @@ Deno.serve(async (req) => {
       return json(200, { runId: existing.id, alreadyRunning: true });
     }
 
+    // Parse optional body params
+    let bodyParams: { maxLeads?: number; maxRetries?: number } = {};
+    try { bodyParams = await req.json(); } catch { /* allow empty body */ }
+    const hardCeiling = Math.max(10, Math.min(Number(bodyParams.maxLeads) || DEFAULT_HARD_CEILING, 500));
+    const maxRetries = Math.max(1, Math.min(Number(bodyParams.maxRetries) || DEFAULT_MAX_RETRIES, 4));
+
     // Create run row
     const { data: run, error: runErr } = await supabase
       .from("lead_fetch_runs")
-      .insert({ user_id: userId, state: "planning", hard_ceiling: HARD_CEILING })
+      .insert({ user_id: userId, state: "planning", hard_ceiling: hardCeiling, max_leads: hardCeiling, max_retries: maxRetries })
       .select("id")
       .single();
     if (runErr || !run) return json(500, { error: runErr?.message ?? "Failed to create run" });
 
     // Kick off background work
     // @ts-ignore EdgeRuntime is provided by Supabase functions runtime
-    EdgeRuntime.waitUntil(runFetch(supabase, run.id, userId, FIRECRAWL_API_KEY, LOVABLE_API_KEY));
+    EdgeRuntime.waitUntil(runFetch(supabase, run.id, userId, FIRECRAWL_API_KEY, LOVABLE_API_KEY, hardCeiling, maxRetries));
 
     return json(200, { runId: run.id, started: true });
   } catch (e) {
