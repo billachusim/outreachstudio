@@ -31,14 +31,44 @@ const ENRICH_TOP_N = 25;
 const SEARCH_CREDIT_PER_CALL = 1;
 const SCRAPE_CREDIT_PER_CALL = 1;
 
+// Hosts we never insert as leads AND never try to mine (social, search, marketplaces).
 const HOST_BLOCKLIST = [
   "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
   "youtube.com", "tiktok.com", "pinterest.com", "reddit.com", "quora.com",
   "wikipedia.org", "yelp.com", "tripadvisor.com", "yellowpages.com",
   "maps.google.com", "google.com", "bing.com", "duckduckgo.com",
-  "amazon.com", "ebay.com", "etsy.com", "medium.com", "substack.com",
+  "amazon.com", "ebay.com", "etsy.com",
   "github.com", "indeed.com", "glassdoor.com", "crunchbase.com",
 ];
+
+// Hosts that publish listicles/blogs/directories. We DO NOT insert them as leads,
+// but we DO scrape them and extract the businesses they mention.
+const LISTICLE_HOSTS = [
+  "techcabal.com", "techpoint.africa", "businessday.ng", "guardian.ng",
+  "premiumtimesng.com", "punchng.com", "thecable.ng", "nairametrics.com",
+  "ventureburn.com", "disrupt-africa.com", "disruptafrica.com",
+  "medium.com", "substack.com",
+  "forbes.com", "inc.com", "entrepreneur.com", "fastcompany.com", "techcrunch.com",
+  "clutch.co", "goodfirms.co", "g2.com", "capterra.com", "trustpilot.com",
+  "producthunt.com", "owler.com",
+];
+
+const LISTICLE_TITLE_RE = /^(top|best|leading|\d+\s+best|\d+\s+top|\d+\s+leading)\b/i;
+const LISTICLE_KEYWORD_RE = /(list of|directory|companies in|startups in|agencies in|firms in|businesses in)/i;
+const LISTICLE_PATH_RE = /\/(blog|article|articles|news|posts|post|list|directory|guides?|insights?)\//i;
+
+const isListicleHost = (h: string) => LISTICLE_HOSTS.some((b) => h === b || h.endsWith(`.${b}`));
+
+function looksLikeAggregator(hit: { url: string; title?: string }, host: string): boolean {
+  if (isListicleHost(host)) return true;
+  const t = (hit.title ?? "").trim();
+  if (t && (LISTICLE_TITLE_RE.test(t) || LISTICLE_KEYWORD_RE.test(t))) return true;
+  try {
+    const path = new URL(hit.url).pathname;
+    if (LISTICLE_PATH_RE.test(path)) return true;
+  } catch { /* ignore */ }
+  return false;
+}
 
 const json = (status: number, payload: unknown) =>
   new Response(JSON.stringify(payload), {
