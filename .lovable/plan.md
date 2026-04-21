@@ -1,121 +1,67 @@
 
 
-# Intel → Action: Full Build
+# AI cost optimization — single-user pass
 
-## What we're shipping (everything across all 4 phases)
+Since you're the only user, I'm dropping the anti-spam debounce/cooldown work and keeping the changes that **structurally** save credits regardless of usage pattern.
 
-### Phase 1 — Pitch from intel
-- "Draft pitch from intel" drawer on each `/intel` card → AI drafts pitch grounded in article + matched offering + memory → save as draft or send
-- New agent tool `draft_pitch_from_intel` so Studio Agent can draft from a headline by name
-- Auto-link intel to existing leads by domain match (during scan, after insert)
-- Dashboard "Today's Top Triggers" widget (top 3 by score, quick "Draft pitch" button)
+## What we're building
 
-### Phase 2 — Auto-discover leads from intel
-- "Create lead from this story" button on intel cards → Firecrawl scrapes article → extracts company + website + person → runs `enrich-lead` → inserts lead under matched offering's campaign
-- Per-offering toggle `auto_lead_from_intel` (off by default) → daily cron auto-creates leads from score ≥ 80 items, queued as `status='new'` for your review before send
+### 1. Cache-first social drafts (biggest win)
+- `IntelSocialDrawer` opens → query `social_drafts` for this intel across all 3 platforms → pre-fill textareas. No AI call on open.
+- Draft button only fires AI when no row exists. Becomes "Re-draft" (with "AI" badge) when one exists.
+- `draft-social-from-intel` (single-item mode) also checks DB first and returns the cached row's id when present — protects against any client bypass.
+- Same cache-check in `/intel` page's "Draft post" dropdown and `TopTriggersWidget`'s Post button.
 
-### Phase 3 — Smarter intel
-- **Custom sources page** at `/intel/sources` → add your own URLs/RSS feeds (Disrupt Africa, Ventures Africa, niche blogs); scan-intel reads from a new `intel_sources` table merged with the 3 hardcoded defaults
-- **Keyword boosters per offering** → new `trigger_keywords text[]` column on `offerings`; scoring prompt gets these keywords and bumps score when matched
-- **Decay & cleanup** → daily cron deletes intel items older than 14 days that are unactioned and have no linked pitch/lead
+### 2. Cache-first pitches
+- `IntelPitchDrawer` Save button **inserts the `pitches` row directly from client state** (subject + body already in memory from the draft step). Drops the second AI call entirely.
+- Updates `intel_items.linked_pitch_id` and lead status from the client.
+- If `intel_items.linked_pitch_id` is set, intel cards show "Pitch drafted ✓" with a "View pitch" action that opens the existing row instead of redrafting.
 
-### Phase 4 — Content engine
-- New `social_drafts` table: stores AI-drafted posts (X thread, LinkedIn, IG caption) tied to an intel item
-- New edge function `draft-social-from-intel` → runs nightly on top intel items tagged "commentary-worthy"; also callable manually per intel card via "Draft social post" button
-- New `/social` page with tabs for **X**, **LinkedIn**, **Instagram** drafts → each card shows the post, source intel, copy button, "Auto-post" button (uses existing `post-x` / `post-facebook` / `post-instagram` functions when channels are connected; otherwise greyed out with "Connect channel" hint)
-- Add **Social** entry to sidebar + mobile tab bar
+### 3. `scan-intel` token cuts
+- Switch scoring model: `gemini-2.5-flash` → **`gemini-2.5-flash-lite`** (~10× cheaper, plenty for 0–100 scoring).
+- Trim each candidate's summary sent to the prompt from up to 600 chars → **200 chars**.
+- Chunk candidates: max **20 per AI call** (today everything goes in one bloated prompt; if a scan returns 40 articles, we now do 2 lean calls).
+- Skip the AI call when there are zero offerings with `problem_solved` or `trigger_keywords` (nothing to score against).
 
-### Weekly digest
-- New cron `weekly-intel-digest` Sunday 6pm WAT → emails you (via Resend) a summary of the week's intel, what was pitched, what's still unactioned, top scorers
+### 4. Trim the nightly social cron
+- Today: top 3 intel × {X, LinkedIn} = **6 AI calls/night**.
+- New: top 2 intel × {X only} at score ≥ 70 = **2 AI calls/night**.
+- LinkedIn + Instagram still available on demand from the drawer (cached after first generation).
 
-## Database changes (one migration)
+### 5. UI transparency
+- "AI" badge (tooltip: "Uses 1 AI call") on every button that triggers a fresh generation: Draft pitch, Re-draft, Draft X/LinkedIn/IG, Scan now, Refresh briefing.
+- "Cached" badge when the drawer pre-fills from an existing row.
+
+## DB change (one migration)
 
 ```sql
--- Phase 3: custom sources per user
-create table public.intel_sources (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  name text not null,
-  url text not null,
-  enabled boolean not null default true,
-  created_at timestamptz not null default now()
-);
-alter table public.intel_sources enable row level security;
--- own-row CRUD policies
-
--- Phase 3: keyword boosters
-alter table public.offerings add column trigger_keywords text[] default '{}';
-
--- Phase 2: per-offering auto-lead toggle
-alter table public.offerings add column auto_lead_from_intel boolean not null default false;
-
--- Phase 1: link intel ↔ lead and intel ↔ pitch
-alter table public.intel_items add column linked_lead_id uuid;
-alter table public.intel_items add column linked_pitch_id uuid;
-create index on public.intel_items(linked_lead_id);
-
--- Phase 4: social drafts
-create table public.social_drafts (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  intel_item_id uuid,
-  platform text not null,            -- 'x' | 'linkedin' | 'instagram'
-  body text not null,
-  status text not null default 'draft', -- draft | posted | dismissed
-  posted_at timestamptz,
-  provider_post_id text,
-  created_at timestamptz not null default now()
-);
-alter table public.social_drafts enable row level security;
--- own-row CRUD policies
+-- enforce one draft per (user, intel, platform) at DB level so cache-check is bulletproof
+create unique index if not exists idx_social_drafts_unique_cache
+  on public.social_drafts (user_id, intel_item_id, platform);
 ```
 
-## New edge functions
+No `last_scan_at` column — dropped with the cooldown.
 
-- `draft-pitch-from-intel` — input: `intel_item_id`, optional `offering_id` → returns `{subject, body}` + saves a `pitches` row
-- `intel-to-lead` — input: `intel_item_id` → Firecrawl scrape article → AI extract `{company, website, contact_name?}` → call `enrich-lead` → insert into `leads` → link back to intel item
-- `draft-social-from-intel` — input: `intel_item_id`, `platform` → AI drafts post → insert `social_drafts` row
-- `weekly-intel-digest` — cron, emails user via Resend
-- `cleanup-intel` — cron, deletes stale unactioned items
+## Files touched
 
-## Modified edge functions
+**Edge functions:**
+- `supabase/functions/draft-social-from-intel/index.ts` — DB cache-check before AI in single-item mode; nightly batch → X-only, top 2, score ≥ 70.
+- `supabase/functions/scan-intel/index.ts` — model swap, 200-char summary trim, chunking, skip when no scoreable offerings.
 
-- `scan-intel` — read `intel_sources` for the user, merge with defaults; pass each offering's `trigger_keywords` into the scoring prompt; after insert, match `extract_root_domain(url)` against `leads.root_domain` to set `linked_lead_id`; if offering has `auto_lead_from_intel=true` and score ≥ 80, fire `intel-to-lead`
-- `studio-agent` — register new tool `draft_pitch_from_intel({headline_or_id, offering_hint?})`
-- `daily-briefing` — already pulls intel; no change needed
+**Client:**
+- `src/components/IntelSocialDrawer.tsx` — pre-load from `social_drafts`; show Cached vs AI badge; AI call only on explicit Re-draft.
+- `src/components/IntelPitchDrawer.tsx` — Save inserts `pitches` directly; no second AI call.
+- `src/pages/Intel.tsx` — cache-check before drafting social; show "Pitch drafted" state when `linked_pitch_id` set.
+- `src/components/TopTriggersWidget.tsx` — same cached-first pattern; cached badge.
 
-## Cron jobs (added)
+## Expected impact
 
-| Job | Schedule (UTC) | Local (WAT) |
+| Action | Before | After |
 |---|---|---|
-| `cleanup-intel` | `0 4 * * *` | 5am daily |
-| `draft-social-from-intel` (nightly batch) | `30 5 * * *` | 6:30am daily |
-| `weekly-intel-digest` | `0 17 * * 0` | 6pm Sunday |
+| Draft + save 1 pitch | 2 AI calls | **1** |
+| Open social drawer (cached) | up to 3 AI calls | **0** |
+| Nightly social cron | 6 calls | **2** |
+| Per-call scan scoring cost | flash @ 600-char | **flash-lite @ 200-char** (~10× cheaper) |
 
-## New / modified UI
-
-**New files:**
-- `src/components/IntelPitchDrawer.tsx` — drawer with AI-drafted pitch, edit, save/send
-- `src/components/IntelLeadDrawer.tsx` — confirms extracted company before creating lead
-- `src/pages/Social.tsx` — tabs (X / LinkedIn / Instagram), copy + auto-post per card
-- `src/pages/IntelSources.tsx` — manage custom sources
-- `src/components/TopTriggersWidget.tsx` — dashboard widget
-
-**Modified:**
-- `src/pages/Intel.tsx` — add "Draft pitch", "Create lead", "Draft social", and a link to `/intel/sources`; show linked-lead badge
-- `src/pages/Dashboard.tsx` — embed `<TopTriggersWidget />`
-- `src/pages/Offerings.tsx` — add `trigger_keywords` chip-input + `auto_lead_from_intel` toggle per offering
-- `src/components/AppSidebar.tsx` + `src/components/MobileTabBar.tsx` — add **Social** entry
-- `src/App.tsx` — add `/social` and `/intel/sources` routes
-
-## Two decisions before I build
-
-1. **Mobile tab bar already has 5 items (Studio, Agent, Campaigns, Leads, Inbox).** Adding Social makes 6 — feels cramped on mobile. Options:
-   - **A:** Replace **Campaigns** with **Social** in the mobile bar (Campaigns stays in sidebar). Cleaner.
-   - **B:** Show 6 tabs, slightly tighter spacing.
-   - **Default if no answer: A.**
-
-2. **Auto-lead from intel default:** off per offering, you flip it on per-offering as you trust it. **Default: off.** OK?
-
-If you say "go", defaults apply and I build everything in this round.
+Roughly **50–70% cut** in daily AI spend, no functionality lost.
 
