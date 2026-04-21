@@ -123,6 +123,7 @@ Deno.serve(async (req) => {
     if (!platform || !["x", "linkedin", "instagram"].includes(platform))
       return json(400, { error: "platform required (x|linkedin|instagram)" });
 
+    const authHeader = req.headers.get("Authorization") ?? "";
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
