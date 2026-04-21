@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Newspaper, Sparkles, ExternalLink, Megaphone } from "lucide-react";
+import { Newspaper, Sparkles, ExternalLink, Megaphone, FileText } from "lucide-react";
 import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
 import { IntelSocialDrawer } from "@/components/IntelSocialDrawer";
 

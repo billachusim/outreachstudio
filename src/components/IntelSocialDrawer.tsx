@@ -6,7 +6,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Sparkles, Copy, Send, Loader2 } from "lucide-react";
 
@@ -22,34 +24,70 @@ interface Props {
 const POST_FN: Record<Platform, string | null> = {
   x: "post-x",
   instagram: "post-instagram",
-  linkedin: null, // no post fn yet
+  linkedin: null,
 };
+
+const EMPTY = { x: "", linkedin: "", instagram: "" };
 
 export const IntelSocialDrawer = ({ open, onOpenChange, intelItemId, intelTitle }: Props) => {
   const [platform, setPlatform] = useState<Platform>("x");
-  const [bodies, setBodies] = useState<Record<Platform, string>>({ x: "", linkedin: "", instagram: "" });
+  const [bodies, setBodies] = useState<Record<Platform, string>>(EMPTY);
+  const [cached, setCached] = useState<Record<Platform, boolean>>({ x: false, linkedin: false, instagram: false });
+  const [draftIds, setDraftIds] = useState<Record<Platform, string | null>>({ x: null, linkedin: null, instagram: null });
   const [drafting, setDrafting] = useState<Platform | null>(null);
   const [posting, setPosting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
+  // Pre-load cached drafts when drawer opens — zero AI calls
   useEffect(() => {
-    if (!open) { setBodies({ x: "", linkedin: "", instagram: "" }); setPlatform("x"); }
-  }, [open]);
+    if (!open || !intelItemId) {
+      setBodies(EMPTY);
+      setCached({ x: false, linkedin: false, instagram: false });
+      setDraftIds({ x: null, linkedin: null, instagram: null });
+      setPlatform("x");
+      return;
+    }
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from("social_drafts")
+        .select("id, platform, body")
+        .eq("intel_item_id", intelItemId);
+      const newBodies = { ...EMPTY };
+      const newCached = { x: false, linkedin: false, instagram: false };
+      const newIds: Record<Platform, string | null> = { x: null, linkedin: null, instagram: null };
+      for (const row of data ?? []) {
+        const p = row.platform as Platform;
+        if (p in newBodies) {
+          newBodies[p] = row.body;
+          newCached[p] = true;
+          newIds[p] = row.id;
+        }
+      }
+      setBodies(newBodies);
+      setCached(newCached);
+      setDraftIds(newIds);
+      setLoading(false);
+    })();
+  }, [open, intelItemId]);
 
   const draft = async (p: Platform) => {
     if (!intelItemId) return;
     setDrafting(p);
     const { data, error } = await supabase.functions.invoke("draft-social-from-intel", {
-      body: { intelItemId, platform: p },
+      body: { intelItemId, platform: p, force: cached[p] }, // force re-draft only when explicitly clicking Re-draft
     });
     setDrafting(null);
     if (error) return toast.error(error.message);
     if ((data as any)?.error) return toast.error((data as any).error);
-    // Re-fetch the body we just inserted
-    const { data: row } = await supabase.from("social_drafts")
-      .select("body").eq("id", (data as any).id).maybeSingle();
+    const id = (data as any)?.id;
+    if (!id) return;
+    const { data: row } = await supabase.from("social_drafts").select("body").eq("id", id).maybeSingle();
     if (row?.body) {
       setBodies((b) => ({ ...b, [p]: row.body }));
-      toast.success(`${p.toUpperCase()} draft ready`);
+      setCached((c) => ({ ...c, [p]: true }));
+      setDraftIds((d) => ({ ...d, [p]: id }));
+      toast.success((data as any)?.cached ? `${p.toUpperCase()} draft loaded from cache` : `${p.toUpperCase()} draft ready`);
     }
   };
 
@@ -84,24 +122,45 @@ export const IntelSocialDrawer = ({ open, onOpenChange, intelItemId, intelTitle 
 
           <Tabs value={platform} onValueChange={(v) => setPlatform(v as Platform)} className="pb-4">
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="x">X</TabsTrigger>
-              <TabsTrigger value="linkedin">LinkedIn</TabsTrigger>
-              <TabsTrigger value="instagram">Instagram</TabsTrigger>
+              <TabsTrigger value="x" className="gap-1.5">
+                X {cached.x && <Badge variant="secondary" className="text-[9px] px-1 h-4">Cached</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="linkedin" className="gap-1.5">
+                LinkedIn {cached.linkedin && <Badge variant="secondary" className="text-[9px] px-1 h-4">Cached</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="instagram" className="gap-1.5">
+                Instagram {cached.instagram && <Badge variant="secondary" className="text-[9px] px-1 h-4">Cached</Badge>}
+              </TabsTrigger>
             </TabsList>
 
             {(["x", "linkedin", "instagram"] as Platform[]).map((p) => (
               <TabsContent key={p} value={p} className="space-y-3 pt-4">
-                <Button onClick={() => draft(p)} disabled={drafting === p} className="w-full">
-                  {drafting === p ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
-                  {drafting === p ? "Drafting…" : bodies[p] ? "Re-draft" : `Draft ${p.toUpperCase()} post`}
-                </Button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button onClick={() => draft(p)} disabled={drafting === p || loading} className="w-full gap-2">
+                        {drafting === p ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        {drafting === p
+                          ? "Drafting…"
+                          : cached[p]
+                            ? `Re-draft ${p.toUpperCase()} post`
+                            : `Draft ${p.toUpperCase()} post`}
+                        <Badge variant="outline" className="text-[9px] px-1 h-4 ml-1">AI</Badge>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Uses 1 AI call</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 <div className="space-y-1.5">
-                  <Label className="text-xs uppercase text-muted-foreground">Post</Label>
+                  <Label className="text-xs uppercase text-muted-foreground flex items-center gap-2">
+                    Post
+                    {cached[p] && !drafting && <Badge variant="secondary" className="text-[9px] px-1 h-4">Cached</Badge>}
+                  </Label>
                   <Textarea
                     value={bodies[p]}
                     onChange={(e) => setBodies((b) => ({ ...b, [p]: e.target.value }))}
                     rows={p === "x" ? 6 : 12}
-                    placeholder={`Click "Draft ${p.toUpperCase()} post" to generate with AI`}
+                    placeholder={loading ? "Loading cached drafts…" : `Click "Draft ${p.toUpperCase()} post" to generate with AI`}
                   />
                   {p === "x" && bodies.x && (
                     <p className="text-xs text-muted-foreground text-right">{bodies.x.length} / 280</p>

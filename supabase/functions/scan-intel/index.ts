@@ -116,6 +116,12 @@ async function runScanJob(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_
 
       const offerings = offRes.data ?? [];
       if (offerings.length === 0) continue;
+      // Skip AI scoring entirely if there's nothing to score against
+      const scoreable = offerings.some((o: any) =>
+        (o.problem_solved && String(o.problem_solved).trim().length > 0) ||
+        (Array.isArray(o.trigger_keywords) && o.trigger_keywords.filter(Boolean).length > 0)
+      );
+      if (!scoreable) { console.log(`scan-intel: user ${userId} has no scoreable offerings, skipping`); continue; }
 
       // Custom sources for this user
       const userArticles = (srcRes.data?.length ?? 0) > 0
@@ -148,29 +154,36 @@ async function runScanJob(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_
       const candidates = combined.filter((a) => !existingSet.has(a.url));
       if (candidates.length === 0) continue;
 
-      const ai = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: "You are an outreach intel analyst. Given a creator's offerings (each with optional trigger keywords) + identity, and a list of news articles, score each article 0-100 for outreach value. Boost the score when an article headline/summary matches an offering's trigger keywords. Match relevant offering IDs. Return STRICT JSON only." },
-            { role: "user", content:
-                `OFFERINGS:\n${offeringSummary}\n\nIDENTITY/MEMORY:\n${memorySummary}\n\nARTICLES (index → title | source):\n` +
-                candidates.map((a, i) => `${i}. ${a.title} | ${a.source}${a.summary ? ` — ${a.summary}` : ""}`).join("\n") +
-                `\n\nReturn JSON: {"scores":[{"i":0,"score":75,"matched_offering_ids":["uuid",...],"tags":["funding","fintech"],"reason":"why"}]}` },
-          ],
-          response_format: { type: "json_object" },
-        }),
-      });
-
-      let scores: any[] = [];
-      if (ai.ok) {
-        try {
-          const aj = await ai.json();
-          const txt = aj?.choices?.[0]?.message?.content ?? "{}";
-          scores = JSON.parse(txt)?.scores ?? [];
-        } catch (e) { console.error("scan-intel: parse scores", e); }
+      // Chunk to keep prompts lean (max 20 articles per AI call). Trim summaries to 200 chars.
+      const CHUNK = 20;
+      const scores: any[] = [];
+      for (let start = 0; start < candidates.length; start += CHUNK) {
+        const slice = candidates.slice(start, start + CHUNK);
+        const ai = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-flash-lite",
+            messages: [
+              { role: "system", content: "You are an outreach intel analyst. Given a creator's offerings (each with optional trigger keywords) + identity, and a list of news articles, score each article 0-100 for outreach value. Boost the score when an article headline/summary matches an offering's trigger keywords. Match relevant offering IDs. Return STRICT JSON only." },
+              { role: "user", content:
+                  `OFFERINGS:\n${offeringSummary}\n\nIDENTITY/MEMORY:\n${memorySummary}\n\nARTICLES (index → title | source):\n` +
+                  slice.map((a, i) => `${start + i}. ${a.title} | ${a.source}${a.summary ? ` — ${String(a.summary).slice(0, 200)}` : ""}`).join("\n") +
+                  `\n\nReturn JSON: {"scores":[{"i":0,"score":75,"matched_offering_ids":["uuid",...],"tags":["funding","fintech"],"reason":"why"}]}` },
+            ],
+            response_format: { type: "json_object" },
+          }),
+        });
+        if (ai.ok) {
+          try {
+            const aj = await ai.json();
+            const txt = aj?.choices?.[0]?.message?.content ?? "{}";
+            const chunkScores = JSON.parse(txt)?.scores ?? [];
+            scores.push(...chunkScores);
+          } catch (e) { console.error("scan-intel: parse scores", e); }
+        } else {
+          console.error(`scan-intel: AI ${ai.status} on chunk ${start}`);
+        }
       }
 
       // Pull leads once for domain matching

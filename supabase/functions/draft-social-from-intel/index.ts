@@ -12,7 +12,7 @@ const json = (s: number, p: unknown) =>
   new Response(JSON.stringify(p), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 type Platform = "x" | "linkedin" | "instagram";
-interface Body { intelItemId?: string; platform?: Platform; }
+interface Body { intelItemId?: string; platform?: Platform; force?: boolean; }
 
 function platformGuide(p: Platform): string {
   switch (p) {
@@ -88,15 +88,14 @@ Deno.serve(async (req) => {
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const { intelItemId, platform } = body as Body;
+    const { intelItemId, platform, force } = body as Body;
 
-    // Cron mode (no intelItemId): draft for top items across all users.
-    // Allowed for any caller — it only reads top intel and writes drafts; no user data leak.
+    // Cron mode (no intelItemId): X-only, top 2 items per user, score >= 70.
     if (!intelItemId) {
       const supabase = createClient(Deno.env.get("SUPABASE_URL")!, SERVICE_KEY);
       const since = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
       const { data: items } = await supabase.from("intel_items")
-        .select("*").gte("created_at", since).gte("relevance_score", 60).eq("acted_on", false)
+        .select("*").gte("created_at", since).gte("relevance_score", 70).eq("acted_on", false)
         .order("relevance_score", { ascending: false }).limit(30);
 
       const byUser: Record<string, any[]> = {};
@@ -104,16 +103,14 @@ Deno.serve(async (req) => {
 
       let drafted = 0;
       for (const [userId, userItems] of Object.entries(byUser)) {
-        const top = userItems.slice(0, 3);
+        const top = userItems.slice(0, 2);
         for (const it of top) {
-          // skip if a draft already exists for this intel
+          // skip if any draft already exists for this intel (any platform)
           const { count } = await supabase.from("social_drafts")
             .select("id", { count: "exact", head: true }).eq("intel_item_id", it.id);
           if ((count ?? 0) > 0) continue;
-          for (const p of ["x", "linkedin"] as Platform[]) {
-            try { await draftOne(supabase, userId, it, p, LOVABLE_API_KEY); drafted++; }
-            catch (e) { console.error("draftOne failed", e); }
-          }
+          try { await draftOne(supabase, userId, it, "x", LOVABLE_API_KEY); drafted++; }
+          catch (e) { console.error("draftOne failed", e); }
         }
       }
       return json(200, { drafted });
@@ -135,8 +132,27 @@ Deno.serve(async (req) => {
     const { data: intel } = await supabase.from("intel_items").select("*").eq("id", intelItemId).maybeSingle();
     if (!intel) return json(404, { error: "Intel not found" });
 
+    // Cache check: return existing draft id unless force=true
+    if (!force) {
+      const { data: existing } = await supabase
+        .from("social_drafts")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("intel_item_id", intelItemId)
+        .eq("platform", platform)
+        .maybeSingle();
+      if (existing?.id) return json(200, { id: existing.id, cached: true });
+    } else {
+      // Force: delete the existing row so the new insert doesn't collide with the unique index
+      await supabase.from("social_drafts")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("intel_item_id", intelItemId)
+        .eq("platform", platform);
+    }
+
     const id = await draftOne(supabase, user.id, intel, platform, LOVABLE_API_KEY);
-    return json(200, { id });
+    return json(200, { id, cached: false });
   } catch (e) {
     console.error("draft-social-from-intel error", e);
     return json(500, { error: e instanceof Error ? e.message : "Unknown error" });
