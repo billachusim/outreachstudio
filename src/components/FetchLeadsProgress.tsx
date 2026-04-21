@@ -77,11 +77,23 @@ export const FetchLeadsProgress = ({ variant = "button", onChange }: Props) => {
       .channel(`fetch-runs-${user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "lead_fetch_runs", filter: `user_id=eq.${user.id}` }, (payload: any) => {
         const next = (payload.new ?? payload.old) as FetchRun;
-        setRun((prev) => {
-          if (!prev || new Date(next.created_at) >= new Date(prev.created_at)) return next;
-          return prev;
+        const prev = (payload.old ?? null) as FetchRun | null;
+        setRun((curr) => {
+          if (!curr || new Date(next.created_at) >= new Date(curr.created_at)) return next;
+          return curr;
         });
         onChange?.(next);
+        // Surface promotion toast when promoted_sources_count rises (typically at run completion).
+        const newPromoted = next?.promoted_sources_count ?? 0;
+        const oldPromoted = prev?.promoted_sources_count ?? 0;
+        if (newPromoted > oldPromoted) {
+          const added = newPromoted - oldPromoted;
+          toast({
+            title: `${added} new intel source${added === 1 ? "" : "s"} auto-added`,
+            description: "Promoted from listicles that produced quality leads. Tap to review.",
+            // @ts-expect-error - allow custom action via onClick prop hack: provide link in description
+          });
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
