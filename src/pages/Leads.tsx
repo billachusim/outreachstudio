@@ -20,6 +20,7 @@ import { BulkDraftBar } from "@/components/BulkDraftBar";
 import { LeadDetailDrawer, type LeadDetail } from "@/components/LeadDetailDrawer";
 import { LeadCard } from "@/components/LeadCard";
 import { ImportLeadsDialog } from "@/components/ImportLeadsDialog";
+import { FetchLeadsProgress } from "@/components/FetchLeadsProgress";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const RAW_VALUE = "__raw__";
@@ -206,6 +207,7 @@ const Leads = () => {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="gap-1"><Globe className="h-3 w-3" />Region: {region}</Badge>
+          <FetchLeadsProgress onChange={(r) => { if (r && (r.state === "done" || r.state === "stopped" || r.state === "searching" || r.state === "enriching")) load(); }} />
           <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
             <Upload className="h-4 w-4" /> Import CSV
           </Button>
