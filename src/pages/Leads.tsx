@@ -13,12 +13,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, Sparkles, MessageCircle, LayoutGrid, List, Search, Mail, Phone, Globe } from "lucide-react";
+import { Plus, Trash2, Sparkles, MessageCircle, LayoutGrid, List, Search, Mail, Phone, Globe, Upload, Inbox, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PitchDrawer } from "@/components/PitchDrawer";
 import { BulkDraftBar } from "@/components/BulkDraftBar";
 import { LeadDetailDrawer, type LeadDetail } from "@/components/LeadDetailDrawer";
 import { LeadCard } from "@/components/LeadCard";
+import { ImportLeadsDialog } from "@/components/ImportLeadsDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+const RAW_VALUE = "__raw__";
+const NO_CAMPAIGN = "__none__";
 
 type LeadStatus = "new" | "enriched" | "drafted" | "sent" | "opened" | "replied" | "won" | "lost";
 const STATUSES: LeadStatus[] = ["new", "enriched", "drafted", "sent", "opened", "replied", "won", "lost"];
@@ -36,10 +41,11 @@ const statusVariant: Record<LeadStatus, string> = {
   lost: "bg-destructive/10 text-destructive",
 };
 
-type TabKey = "all" | "hot" | "ready" | "needs" | "replied" | "won";
+type TabKey = "all" | "raw" | "hot" | "ready" | "needs" | "replied" | "won";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "all", label: "All" },
+  { key: "raw", label: "📥 Raw" },
   { key: "hot", label: "🔥 Hot" },
   { key: "ready", label: "✉ Ready" },
   { key: "needs", label: "⏳ Needs enrichment" },
