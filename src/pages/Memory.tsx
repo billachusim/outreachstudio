@@ -19,8 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb, AlertTriangle } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb } from "lucide-react";
 
 const STARTER_SLUGS = ["identity", "personality", "portfolio", "playbook", "learning-loop"];
 
@@ -254,17 +253,6 @@ const Memory = () => {
           </Dialog>
         </div>
       </div>
-
-      <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>Heads up about "Reset starters"</AlertTitle>
-        <AlertDescription>
-          That button <strong>overwrites your edits</strong> to the 5 built-in starter memories
-          (<code className="font-mono text-xs">identity, personality, portfolio, playbook, learning-loop</code>).
-          Everything else — your custom notes, daily journals, weekly digests, the rollup, and anything the agent appended — is left untouched.
-          Memories shown with the <Badge variant="outline" className="ml-1 text-[10px]">starter</Badge> badge below are the ones at risk.
-        </AlertDescription>
-      </Alert>
 
       <div className="relative max-w-md">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
