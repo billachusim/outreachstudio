@@ -221,7 +221,7 @@ async function runScanJob(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_
             fetch(`${supaUrl}/functions/v1/intel-to-lead`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-              body: JSON.stringify({ intelItemId: item.id, userId }),
+              body: JSON.stringify({ intelItemId: item.id, userIdOverride: userId }),
             }).catch((e) => console.error("auto-lead fire failed", e));
             totalAutoLeads++;
           }
