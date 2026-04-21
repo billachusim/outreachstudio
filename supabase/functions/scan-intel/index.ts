@@ -4,7 +4,7 @@
 //
 // Designed to be called by pg_cron once a day. Idempotent.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 
 const json = (s: number, p: unknown) =>
   new Response(JSON.stringify(p), { status: s, headers: { "Content-Type": "application/json" } });
