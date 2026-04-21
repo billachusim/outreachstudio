@@ -210,6 +210,47 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
       const { error } = await supabase.from("agent_memories").insert({ user_id: userId, slug, title, kind, content });
       return error ? { error: error.message } : { ok: true, created: slug };
     }
+    case "append_memory": {
+      const { slug, content } = args;
+      const { data: existing } = await supabase.from("agent_memories").select("id, content").eq("user_id", userId).eq("slug", slug).maybeSingle();
+      const today = new Date().toISOString().slice(0, 10);
+      const block = `\n\n_${today}_ — ${content}`;
+      if (!existing) {
+        const { error } = await supabase.from("agent_memories").insert({
+          user_id: userId, slug, title: slug, kind: "note", content: `# ${slug}${block}`,
+        });
+        return error ? { error: error.message } : { ok: true, created: slug };
+      }
+      const newContent = (existing.content ?? "") + block;
+      const { error } = await supabase.from("agent_memories").update({ content: newContent }).eq("id", existing.id);
+      return error ? { error: error.message } : { ok: true, appended: slug, length: newContent.length };
+    }
+    case "delete_memory": {
+      const { error } = await supabase.from("agent_memories").delete().eq("user_id", userId).eq("slug", args.slug);
+      return error ? { error: error.message } : { ok: true, deleted: args.slug };
+    }
+    case "rename_memory": {
+      const update: any = {};
+      if (args.new_slug) update.slug = args.new_slug;
+      if (args.new_title) update.title = args.new_title;
+      if (!Object.keys(update).length) return { error: "Provide new_slug or new_title" };
+      const { error } = await supabase.from("agent_memories").update(update).eq("user_id", userId).eq("slug", args.slug);
+      return error ? { error: error.message } : { ok: true, renamed: args.slug, to: update };
+    }
+    case "search_memories": {
+      const q = String(args.query ?? "").trim();
+      if (!q) return [];
+      const { data } = await supabase.from("agent_memories")
+        .select("slug, title, kind, content, updated_at")
+        .eq("user_id", userId)
+        .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+        .limit(args.limit ?? 8);
+      return (data ?? []).map((m: any) => {
+        const idx = m.content.toLowerCase().indexOf(q.toLowerCase());
+        const snippet = idx >= 0 ? m.content.slice(Math.max(0, idx - 60), idx + 200) : m.content.slice(0, 200);
+        return { slug: m.slug, title: m.title, kind: m.kind, snippet, updated_at: m.updated_at };
+      });
+    }
     case "list_recent_intel": {
       let q = supabase.from("intel_items")
         .select("id, source, title, url, relevance_score, matched_offerings, linked_lead_id, acted_on, created_at")
