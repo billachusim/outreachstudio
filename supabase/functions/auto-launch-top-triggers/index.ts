@@ -1,8 +1,8 @@
-// Daily cron: for each user, auto-launch campaigns from their top 3 unacted intel items (last 24h, score >= 60).
-// Uses the service-role key to iterate all users.
+// Daily cron: for each user, auto-launch campaigns from their top 3 unacted intel items
+// (last 24h, relevance_score >= 60). Uses the service-role key to iterate all users.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { buildProposal, runLaunch } from "../launch-campaign-from-intel/index.ts";
+import { buildProposal, runLaunch } from "../_shared/launch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,7 +29,6 @@ Deno.serve(async (req) => {
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    // Fetch candidate intel items across all users
     const { data: items, error } = await admin
       .from("intel_items")
       .select("id, user_id, title, summary, tags, source, relevance_score, created_at")
@@ -42,7 +41,6 @@ Deno.serve(async (req) => {
 
     if (error) return json(500, { error: error.message });
 
-    // Group top N per user
     const perUser = new Map<string, typeof items>();
     for (const it of items ?? []) {
       const list = perUser.get(it.user_id) ?? [];
