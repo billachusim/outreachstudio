@@ -47,20 +47,34 @@ export type LeadDetail = {
 };
 
 type Pitch = { id: string; subject: string | null; sent_at: string | null; created_at: string };
+type Campaign = { id: string; name: string };
 
 interface Props {
   lead: LeadDetail | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  campaigns?: Campaign[];
   onDraftPitch: (lead: LeadDetail) => void;
   onWhatsApp: (lead: LeadDetail) => void;
   onChanged?: () => void;
 }
 
-export const LeadDetailDrawer = ({ lead, open, onOpenChange, onDraftPitch, onWhatsApp, onChanged }: Props) => {
+export const LeadDetailDrawer = ({ lead, open, onOpenChange, campaigns = [], onDraftPitch, onWhatsApp, onChanged }: Props) => {
   const { toast } = useToast();
   const [pitches, setPitches] = useState<Pitch[]>([]);
   const [enriching, setEnriching] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState(false);
+
+  const currentCampaign = campaigns.find((c) => c.id === lead?.campaign_id);
+
+  const reassign = async (newCampaignId: string | null) => {
+    if (!lead) return;
+    const { error } = await supabase.from("leads").update({ campaign_id: newCampaignId }).eq("id", lead.id);
+    if (error) return toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    toast({ title: newCampaignId ? "Reassigned" : "Detached to raw pool" });
+    setEditingCampaign(false);
+    onChanged?.();
+  };
 
   useEffect(() => {
     if (!open || !lead) return;
