@@ -4,11 +4,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, RefreshCw, Check, Newspaper, Sparkles, UserPlus, Settings, Share2, Link as LinkIcon } from "lucide-react";
+import { ExternalLink, RefreshCw, Check, Newspaper, Sparkles, UserPlus, Settings, Share2, Link as LinkIcon, Rocket } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
 import { IntelLeadDrawer } from "@/components/IntelLeadDrawer";
+import { IntelLaunchCampaignDrawer } from "@/components/IntelLaunchCampaignDrawer";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
 type IntelItem = {
@@ -33,6 +34,7 @@ const Intel = () => {
   const [scanning, setScanning] = useState(false);
   const [pitchOpen, setPitchOpen] = useState<IntelItem | null>(null);
   const [leadOpen, setLeadOpen] = useState<IntelItem | null>(null);
+  const [launchOpen, setLaunchOpen] = useState<IntelItem | null>(null);
   const [draftingSocial, setDraftingSocial] = useState<string | null>(null);
 
   const load = async () => {
@@ -157,6 +159,9 @@ const Intel = () => {
                   <Button size="sm" onClick={() => setPitchOpen(it)}>
                     <Sparkles className="h-3.5 w-3.5 mr-1.5" /> Draft pitch
                   </Button>
+                  <Button size="sm" variant="default" className="bg-primary" onClick={() => setLaunchOpen(it)}>
+                    <Rocket className="h-3.5 w-3.5 mr-1.5" /> Launch campaign
+                  </Button>
                   {!it.linked_lead_id && (
                     <Button size="sm" variant="outline" onClick={() => setLeadOpen(it)}>
                       <UserPlus className="h-3.5 w-3.5 mr-1.5" /> Create lead
@@ -201,6 +206,12 @@ const Intel = () => {
         intelTitle={leadOpen?.title}
         intelUrl={leadOpen?.url ?? null}
         onCreated={() => load()}
+      />
+      <IntelLaunchCampaignDrawer
+        open={!!launchOpen}
+        onOpenChange={(v) => { if (!v) { setLaunchOpen(null); load(); } }}
+        intelItemId={launchOpen?.id ?? null}
+        intelTitle={launchOpen?.title}
       />
     </div>
   );

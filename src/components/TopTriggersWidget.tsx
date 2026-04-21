@@ -4,9 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Newspaper, Sparkles, ExternalLink, Megaphone, FileText } from "lucide-react";
+import { Newspaper, Sparkles, ExternalLink, Megaphone, FileText, Rocket } from "lucide-react";
 import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
 import { IntelSocialDrawer } from "@/components/IntelSocialDrawer";
+import { IntelLaunchCampaignDrawer } from "@/components/IntelLaunchCampaignDrawer";
 
 type Item = {
   id: string;
@@ -24,6 +25,7 @@ export const TopTriggersWidget = () => {
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
   const [socialId, setSocialId] = useState<string | null>(null);
+  const [launchId, setLaunchId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -42,6 +44,7 @@ export const TopTriggersWidget = () => {
 
   const active = items.find((i) => i.id === openId) ?? null;
   const activeSocial = items.find((i) => i.id === socialId) ?? null;
+  const activeLaunch = items.find((i) => i.id === launchId) ?? null;
 
   return (
     <>
@@ -71,11 +74,14 @@ export const TopTriggersWidget = () => {
                     <p className="text-xs text-muted-foreground capitalize">{it.source}</p>
                   </div>
                   <div className="flex flex-col gap-1.5 shrink-0">
-                    <Button size="sm" variant="default" onClick={() => setOpenId(it.id)}>
+                    <Button size="sm" variant="default" onClick={() => setLaunchId(it.id)}>
+                      <Rocket className="h-3 w-3 mr-1" /> Launch
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setOpenId(it.id)}>
                       {it.linked_pitch_id ? <FileText className="h-3 w-3 mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
                       {it.linked_pitch_id ? "Pitch ✓" : "Pitch"}
                     </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setSocialId(it.id)}>
+                    <Button size="sm" variant="ghost" onClick={() => setSocialId(it.id)}>
                       <Megaphone className="h-3 w-3 mr-1" /> Post
                     </Button>
                     {it.url && (
@@ -107,6 +113,13 @@ export const TopTriggersWidget = () => {
         onOpenChange={(v) => { if (!v) setSocialId(null); }}
         intelItemId={activeSocial?.id ?? null}
         intelTitle={activeSocial?.title}
+      />
+
+      <IntelLaunchCampaignDrawer
+        open={!!launchId}
+        onOpenChange={(v) => { if (!v) { setLaunchId(null); load(); } }}
+        intelItemId={activeLaunch?.id ?? null}
+        intelTitle={activeLaunch?.title}
       />
     </>
   );
