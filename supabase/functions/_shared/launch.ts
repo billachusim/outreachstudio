@@ -31,22 +31,37 @@ export async function buildProposal(
   userId: string,
   intel: { id: string; title: string; summary: string | null; tags: string[] | null; source: string },
 ): Promise<{ ok: true; proposal: Proposal } | { ok: false; status: number; error: string }> {
-  const { data: offerings } = await supabase
-    .from("offerings")
-    .select("id, title, tagline, ideal_customer")
-    .eq("user_id", userId)
-    .eq("status", "active");
+  const [{ data: offerings }, { data: profile }] = await Promise.all([
+    supabase
+      .from("offerings")
+      .select("id, title, tagline, ideal_customer")
+      .eq("user_id", userId)
+      .eq("status", "active"),
+    supabase
+      .from("profiles")
+      .select("outreach_region, outreach_country_code")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+
+  const region = (profile as any)?.outreach_region || "Nigeria";
+  const countryCode = (profile as any)?.outreach_country_code || "ng";
 
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) return { ok: false, status: 500, error: "LOVABLE_API_KEY missing" };
 
   const sys = `You are a B2B outreach strategist. Given a news/intel story and a list of the user's existing offerings, decide:
 1. Whether the story matches an existing offering (return its id) OR a brand-new offering should be created.
-2. Derive concrete campaign parameters to find leads who would care about this story.
+2. Derive concrete campaign parameters to find leads who would care about this story IN THE USER'S REGION.
 
-Be concrete. Pick city/category only if clearly implied. Keywords should be 2-5 short search terms (comma-separated).
-discovery_source: use "google_places" if the campaign targets local brick-and-mortar businesses (restaurants, salons, clinics, shops in a specific city). Use "firecrawl" otherwise (online businesses, B2B SaaS, agencies).
-channel: "email" by default, "whatsapp" only if the lead profile is small local business in an emerging market.`;
+CRITICAL GEOGRAPHIC RULES:
+- The user operates in ${region} (country code: ${countryCode}). All campaigns must target leads in ${region} unless the intel story is exclusively about another region.
+- ALWAYS set "city" — pick a major city in ${region} (e.g. for Nigeria: Lagos, Abuja, Port Harcourt, Ibadan, Kano) if the story doesn't imply a specific one. Never leave city null.
+- ALWAYS bias "keywords" toward the region — e.g. "Lagos restaurants", "Abuja fintech startups", NOT just "restaurants" or "fintech".
+- ALWAYS set "category" to the business vertical the story implies (use a sensible default if needed, never null).
+
+discovery_source: STRONGLY PREFER "google_places" for any local brick-and-mortar ICP (restaurants, salons, clinics, shops, lounges, schools) — it returns real ${region} businesses with phone + address out of the gate. Use "firecrawl" only for online-native businesses, B2B SaaS, agencies, or media.
+channel: "email" by default, "whatsapp" only if the lead profile is small local business with strong WhatsApp culture (very common in ${region}).`;
 
   const usr = `INTEL STORY:
 Title: ${intel.title}
@@ -54,12 +69,14 @@ Source: ${intel.source}
 Summary: ${intel.summary ?? "(none)"}
 Tags: ${(intel.tags ?? []).join(", ")}
 
+USER REGION: ${region} (${countryCode.toUpperCase()})
+
 EXISTING OFFERINGS:
 ${(offerings ?? []).length === 0
   ? "(none)"
   : (offerings ?? []).map((o) => `- ${o.id}: "${o.title}" — ${o.tagline ?? ""} (ICP: ${o.ideal_customer ?? "n/a"})`).join("\n")}
 
-Propose the launch.`;
+Propose the launch (remember: city + category required, keywords region-biased).`;
 
   const tool = {
     type: "function",
