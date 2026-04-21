@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
       return json(200, { ok: true, runId: run.id, transition: "queued->discovering" });
     }
 
-    // STATE: discovering — find leads via Firecrawl
+    // STATE: discovering — find leads via raw pool first, then external sources
     if (run.state === "discovering") {
       // Count existing leads in campaign
       const { count: existingCount } = await supabase
@@ -179,6 +179,73 @@ Deno.serve(async (req) => {
         return json(200, { ok: true, transition: "discovering->enriching" });
       }
 
+      // === Raw-pool sweep: reuse user's unassigned leads matching this campaign ===
+      const need = run.target_lead_count - have;
+      const userRegion = await fetchUserRegion(supabase, run.user_id);
+      const cc = userRegion.countryCode.toLowerCase();
+      const kwTerms: string[] = [];
+      if (campaign.keywords) kwTerms.push(...campaign.keywords.toLowerCase().split(/[,\s]+/).filter((t) => t.length > 2));
+      if (campaign.category) kwTerms.push(...campaign.category.toLowerCase().split(/[,\s]+/).filter((t) => t.length > 2));
+      const cityLc = (campaign.city ?? "").toLowerCase();
+
+      const { data: rawPool } = await supabase
+        .from("leads")
+        .select("id, business_name, notes, enrichment_summary, address, website")
+        .eq("user_id", run.user_id)
+        .is("campaign_id", null)
+        .order("score", { ascending: false })
+        .limit(Math.max(need * 4, 25));
+
+      const matchedIds: string[] = [];
+      for (const l of (rawPool ?? [])) {
+        if (matchedIds.length >= need) break;
+        const blob = `${l.business_name ?? ""} ${l.notes ?? ""} ${l.enrichment_summary ?? ""}`.toLowerCase();
+        const addr = (l.address ?? "").toLowerCase();
+        const host = l.website ? rootDomain(l.website) ?? "" : "";
+
+        let kwHits = 0;
+        for (const t of kwTerms) if (t && blob.includes(t)) kwHits++;
+        const cityHit = cityLc && (addr.includes(cityLc) || blob.includes(cityLc));
+        const regionHit = host.endsWith(`.${cc}`) || addr.includes(userRegion.region.toLowerCase());
+
+        // Threshold: ≥1 keyword hit, OR (city hit + region signal), OR (no keywords at all + region hit)
+        const noKw = kwTerms.length === 0;
+        if (kwHits >= 1 || (cityHit && (regionHit || kwHits >= 1)) || (noKw && regionHit)) {
+          matchedIds.push(l.id);
+        }
+      }
+
+      if (matchedIds.length > 0) {
+        const { error: attachErr } = await supabase
+          .from("leads")
+          .update({ campaign_id: campaign.id })
+          .in("id", matchedIds);
+        if (!attachErr) {
+          await logEvent(
+            "reused_from_pool",
+            `Reused ${matchedIds.length} raw lead${matchedIds.length === 1 ? "" : "s"} matching campaign keywords (saving discovery credits).`,
+          );
+          const newHave = have + matchedIds.length;
+          if (newHave >= run.target_lead_count) {
+            await updateRun({ state: "enriching" as never, leads_found: newHave });
+            return json(200, { ok: true, runId: run.id, reused: matchedIds.length, total: newHave, transition: "discovering->enriching" });
+          }
+          // Fall through to external discovery for the remainder
+        }
+      }
+
+      // Re-count after sweep
+      const { count: postSweep } = await supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign.id);
+      const haveAfter = postSweep ?? have;
+      if (haveAfter >= run.target_lead_count) {
+        await updateRun({ state: "enriching" as never, leads_found: haveAfter });
+        return json(200, { ok: true, transition: "discovering->enriching", reused: matchedIds.length });
+      }
+      // Use post-sweep count for remainder targeting
+      const haveForExternal = haveAfter;
       const source = (campaign as any).discovery_source ?? "firecrawl";
 
       // === Google Places branch ===
