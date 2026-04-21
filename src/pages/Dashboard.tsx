@@ -120,6 +120,19 @@ const Dashboard = () => {
     toast({ title: newState === "paused" ? "Paused" : "Resumed" });
   };
 
+  const endRun = async (run: Run) => {
+    const { error } = await supabase
+      .from("campaign_runs")
+      .update({ state: "done", error: "Ended manually" })
+      .eq("id", run.id);
+    if (error) {
+      toast({ title: "Failed to end", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Run ended", description: `${campaigns[run.campaign_id] ?? "Campaign"} stopped.` });
+    load();
+  };
+
   const generateBriefing = async () => {
     setGenerating(true);
     try {
