@@ -465,7 +465,7 @@ async function runFetch(
 
       if (outOfCredits) {
         log("Firecrawl credits exhausted", "error");
-        await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue" });
+        await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue", failure_reason: "Firecrawl credits exhausted — top up to continue" });
         return;
       }
     }
@@ -594,17 +594,23 @@ Deno.serve(async (req) => {
       return json(200, { runId: existing.id, alreadyRunning: true });
     }
 
+    // Parse optional body params
+    let bodyParams: { maxLeads?: number; maxRetries?: number } = {};
+    try { bodyParams = await req.json(); } catch { /* allow empty body */ }
+    const hardCeiling = Math.max(10, Math.min(Number(bodyParams.maxLeads) || DEFAULT_HARD_CEILING, 500));
+    const maxRetries = Math.max(1, Math.min(Number(bodyParams.maxRetries) || DEFAULT_MAX_RETRIES, 4));
+
     // Create run row
     const { data: run, error: runErr } = await supabase
       .from("lead_fetch_runs")
-      .insert({ user_id: userId, state: "planning", hard_ceiling: HARD_CEILING })
+      .insert({ user_id: userId, state: "planning", hard_ceiling: hardCeiling, max_leads: hardCeiling, max_retries: maxRetries })
       .select("id")
       .single();
     if (runErr || !run) return json(500, { error: runErr?.message ?? "Failed to create run" });
 
     // Kick off background work
     // @ts-ignore EdgeRuntime is provided by Supabase functions runtime
-    EdgeRuntime.waitUntil(runFetch(supabase, run.id, userId, FIRECRAWL_API_KEY, LOVABLE_API_KEY));
+    EdgeRuntime.waitUntil(runFetch(supabase, run.id, userId, FIRECRAWL_API_KEY, LOVABLE_API_KEY, hardCeiling, maxRetries));
 
     return json(200, { runId: run.id, started: true });
   } catch (e) {
