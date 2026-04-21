@@ -111,7 +111,7 @@ const Dashboard = () => {
   const generateBriefing = async () => {
     setGenerating(true);
     try {
-      const { error } = await supabase.functions.invoke("daily-briefing", { body: {} });
+      const { error } = await supabase.functions.invoke("daily-briefing", { body: { force: true } });
       if (error) throw error;
       toast({ title: "Briefing generated" });
       load();
