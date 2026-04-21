@@ -132,7 +132,7 @@ const Social = () => {
         {(["x", "linkedin", "instagram"] as Platform[]).map((p) => (
           <TabsContent key={p} value={p} className="space-y-3 mt-4">
             {!isPlatformConnected(p) && (
-              <Card className="border-amber-500/40">
+              <Card className="border-warning/40">
                 <CardContent className="p-3 text-xs text-muted-foreground">
                   No {platformMeta[p].label} channel connected — you can still copy posts manually. <a href="/channels" className="text-primary hover:underline">Connect channel →</a>
                 </CardContent>

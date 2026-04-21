@@ -61,7 +61,7 @@ export const IntelLeadDrawer = ({ open, onOpenChange, intelItemId, intelTitle, i
                 <p><span className="text-muted-foreground">Company:</span> <strong>{result.company}</strong></p>
                 {result.website && <p><span className="text-muted-foreground">Website:</span> {result.website}</p>}
                 {result.contactName && <p><span className="text-muted-foreground">Contact:</span> {result.contactName}</p>}
-                {result.reused && <p className="text-xs text-amber-600">Linked to existing lead.</p>}
+                {result.reused && <p className="text-xs text-warning">Linked to existing lead.</p>}
               </div>
             )}
           </div>
