@@ -19,7 +19,10 @@ import {
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb, AlertTriangle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+const STARTER_SLUGS = ["identity", "personality", "portfolio", "playbook", "learning-loop"];
 
 type Memory = {
   id: string;
@@ -179,7 +182,19 @@ const Memory = () => {
             size="sm"
             onClick={async () => {
               if (!user) return;
-              if (!confirm("Reset starter memories (identity, personality, portfolio, playbook, learning-loop) to defaults? Your custom notes are not touched.")) return;
+              if (!confirm(
+                "⚠️ OVERWRITE WARNING\n\n" +
+                "This will REPLACE your edits to these 5 starter memories:\n" +
+                "  • identity\n  • personality\n  • portfolio\n  • playbook\n  • learning-loop\n\n" +
+                "Their title, kind and full content will be reset to factory defaults. Any wording you changed in those files will be LOST.\n\n" +
+                "SAFE — these are NOT touched:\n" +
+                "  • Any memory with a different slug (your custom notes)\n" +
+                "  • Daily journals (daily-journal-*)\n" +
+                "  • Weekly digests (weekly-journal-*)\n" +
+                "  • The journal-rollup\n" +
+                "  • Anything the agent appended via the learning loop\n\n" +
+                "Continue?"
+              )) return;
               await seedAgentMemoryIfEmpty(user.id, true);
               toast({ title: "Defaults restored" });
               load();
@@ -239,6 +254,17 @@ const Memory = () => {
           </Dialog>
         </div>
       </div>
+
+      <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Heads up about "Reset starters"</AlertTitle>
+        <AlertDescription>
+          That button <strong>overwrites your edits</strong> to the 5 built-in starter memories
+          (<code className="font-mono text-xs">identity, personality, portfolio, playbook, learning-loop</code>).
+          Everything else — your custom notes, daily journals, weekly digests, the rollup, and anything the agent appended — is left untouched.
+          Memories shown with the <Badge variant="outline" className="ml-1 text-[10px]">starter</Badge> badge below are the ones at risk.
+        </AlertDescription>
+      </Alert>
 
       <div className="relative max-w-md">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -315,7 +341,12 @@ const MemoryCard = ({ m, onEdit, onDelete }: { m: Memory; onEdit: () => void; on
           <CardTitle className="truncate text-base">{m.title}</CardTitle>
           <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{m.slug}</p>
         </div>
-        <Badge variant="secondary">{m.kind}</Badge>
+        <div className="flex flex-col items-end gap-1">
+          <Badge variant="secondary">{m.kind}</Badge>
+          {STARTER_SLUGS.includes(m.slug) && (
+            <Badge variant="outline" className="text-[10px]" title="Will be overwritten by 'Reset starters'">starter</Badge>
+          )}
+        </div>
       </div>
     </CardHeader>
     <CardContent className="flex-1 space-y-3">

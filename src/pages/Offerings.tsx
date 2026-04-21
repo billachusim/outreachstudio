@@ -18,10 +18,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Plus, RefreshCw, Trash2, Rocket } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2, Rocket, AlertTriangle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { startOutreachFromOffering } from "@/lib/startOutreach";
 import { useNavigate } from "react-router-dom";
+import { SEED_OFFERINGS } from "@/lib/seedOfferings";
+
+const SEED_TITLES = new Set(SEED_OFFERINGS.map((o) => o.title));
 
 type Offering = {
   id: string;
@@ -127,7 +131,17 @@ const Offerings = () => {
             variant="outline"
             onClick={async () => {
               if (!user) return;
-              if (!confirm("Refresh the built-in offerings (2nd Baze Garden, Tech Faculty, RetailOS, Free Landing Pages) to their latest defaults? This overwrites your edits to those rows.")) return;
+              if (!confirm(
+                "⚠️ OVERWRITE WARNING\n\n" +
+                "This will REPLACE every field on the 12 built-in offerings (matched by title):\n" +
+                "  • 2nd Baze Garden\n  • Tech Faculty\n  • RetailOS\n  • Free Landing Pages for Businesses\n  • Eavesdrop\n  • Alter Ego\n  • Dear Claire\n  • AI Clopedia\n  • Palmshop NG\n  • Nkwo Nnewi App\n  • Exams AI\n  • AutoPR\n\n" +
+                "Tagline, audience, problem, pricing, ideal customer, demo URL — all reset to factory defaults. Your edits to those rows will be LOST.\n\n" +
+                "SAFE — these are NOT touched:\n" +
+                "  • Any offering you created with a different title\n" +
+                "  • trigger_keywords, auto_lead_from_intel, status, screenshot_url\n" +
+                "  • Campaigns, leads, pitches, intel — none of those move\n\n" +
+                "Continue?"
+              )) return;
               await seedOfferingsIfEmpty(user.id, true);
               toast({ title: "Defaults refreshed" });
               load();
@@ -200,7 +214,16 @@ const Offerings = () => {
         </div>
       </div>
 
-      {loading ? (
+      <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Heads up about "Refresh defaults"</AlertTitle>
+        <AlertDescription>
+          That button <strong>overwrites every editable field</strong> on the 12 built-in offerings (matched by title). Cards marked
+          <Badge variant="outline" className="mx-1 text-[10px]">default</Badge> below are at risk.
+          Your custom offerings, plus <code className="font-mono text-xs">trigger_keywords</code>, <code className="font-mono text-xs">auto_lead_from_intel</code>, status, campaigns, leads, pitches and intel are all left untouched.
+        </AlertDescription>
+      </Alert>
+
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : offerings.length === 0 ? (
         <Card>
@@ -215,7 +238,12 @@ const Offerings = () => {
               <CardHeader>
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className="text-lg">{o.title}</CardTitle>
-                  <Badge variant="secondary" className="capitalize">{o.status}</Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant="secondary" className="capitalize">{o.status}</Badge>
+                    {SEED_TITLES.has(o.title) && (
+                      <Badge variant="outline" className="text-[10px]" title="Will be overwritten by 'Refresh defaults'">default</Badge>
+                    )}
+                  </div>
                 </div>
                 {o.tagline && <p className="text-sm text-muted-foreground">{o.tagline}</p>}
               </CardHeader>
