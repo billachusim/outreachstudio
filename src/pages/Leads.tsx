@@ -119,6 +119,7 @@ const Leads = () => {
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
       if ((l.score ?? 0) < minScore) return false;
       switch (tab) {
+        case "raw": return !l.campaign_id;
         case "hot": return (l.score ?? 0) >= 70;
         case "ready": return !!l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status);
         case "needs": return !l.contact_email && !l.phone;
