@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { seedAgentMemoryIfEmpty } from "@/lib/seedAgentMemory";
@@ -17,8 +17,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, Plus, RefreshCw, Trash2, Brain } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb } from "lucide-react";
 
 type Memory = {
   id: string;
@@ -40,6 +41,9 @@ const Memory = () => {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Partial<Memory>>(empty);
+  const [search, setSearch] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
 
   useEffect(() => {
     document.title = "Memory · Outreach Studio";
@@ -91,7 +95,63 @@ const Memory = () => {
     load();
   };
 
-  const grouped = memories.reduce<Record<string, Memory[]>>((acc, m) => {
+  const generateJournal = async () => {
+    setGenerating(true);
+    const { error } = await supabase.functions.invoke("daily-journal", {
+      body: { force: true, only_user: true },
+    });
+    setGenerating(false);
+    if (error) {
+      toast({ title: "Journal failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Today's journal generated" });
+    load();
+  };
+
+  const openLessonsLearned = () => {
+    const existing = memories.find((m) => m.slug === "lessons-learned");
+    if (existing) {
+      setDraft(existing);
+    } else {
+      setDraft({
+        slug: "lessons-learned",
+        title: "Lessons learned",
+        kind: "note",
+        content: `# Lessons learned\n\n_Things that worked, things that didn't, patterns spotted. The agent reads this every turn._\n\n- `,
+      });
+    }
+    setOpen(true);
+  };
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return memories;
+    return memories.filter(
+      (m) =>
+        m.title.toLowerCase().includes(q) ||
+        m.slug.toLowerCase().includes(q) ||
+        m.content.toLowerCase().includes(q),
+    );
+  }, [memories, search]);
+
+  const journals = useMemo(
+    () =>
+      filtered
+        .filter((m) => m.slug.startsWith("daily-journal-") || m.slug.startsWith("weekly-journal-") || m.slug === "journal-rollup")
+        .sort((a, b) => b.slug.localeCompare(a.slug)),
+    [filtered],
+  );
+
+  const nonJournal = useMemo(
+    () =>
+      filtered.filter(
+        (m) => !m.slug.startsWith("daily-journal-") && !m.slug.startsWith("weekly-journal-") && m.slug !== "journal-rollup",
+      ),
+    [filtered],
+  );
+
+  const grouped = nonJournal.reduce<Record<string, Memory[]>>((acc, m) => {
     (acc[m.kind] ??= []).push(m);
     return acc;
   }, {});
@@ -104,15 +164,22 @@ const Memory = () => {
             <Brain className="h-5 w-5 sm:h-6 sm:w-6" /> Agent Memory
           </h1>
           <p className="text-sm text-muted-foreground">
-            The studio agent reads these markdown files at the start of every chat. Edit them to shape its identity, tone, knowledge, and playbook.
+            The studio agent reads these markdown files at the start of every chat. The journal auto-writes nightly so it learns what happened each day.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={openLessonsLearned}>
+            <Lightbulb className="h-4 w-4" /> Lessons learned
+          </Button>
+          <Button variant="outline" size="sm" onClick={generateJournal} disabled={generating}>
+            <Sparkles className="h-4 w-4" /> {generating ? "Generating…" : "Generate today's journal"}
+          </Button>
           <Button
             variant="outline"
+            size="sm"
             onClick={async () => {
               if (!user) return;
-              if (!confirm("Reset the 4 starter memories (identity, personality, portfolio, playbook) to defaults? Your custom notes are not touched.")) return;
+              if (!confirm("Reset starter memories (identity, personality, portfolio, playbook, learning-loop) to defaults? Your custom notes are not touched.")) return;
               await seedAgentMemoryIfEmpty(user.id, true);
               toast({ title: "Defaults restored" });
               load();
@@ -122,7 +189,7 @@ const Memory = () => {
           </Button>
           <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setDraft(empty); }}>
             <DialogTrigger asChild>
-              <Button onClick={() => setDraft(empty)}>
+              <Button size="sm" onClick={() => setDraft(empty)}>
                 <Plus className="h-4 w-4" /> New memory
               </Button>
             </DialogTrigger>
@@ -173,6 +240,16 @@ const Memory = () => {
         </div>
       </div>
 
+      <div className="relative max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search memories by title, slug, or content…"
+          className="pl-9"
+        />
+      </div>
+
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : memories.length === 0 ? (
@@ -183,44 +260,84 @@ const Memory = () => {
         </Card>
       ) : (
         <div className="space-y-6">
+          {journals.length > 0 && (
+            <Collapsible open={journalOpen} onOpenChange={setJournalOpen}>
+              <div className="rounded-lg border bg-card">
+                <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 p-4 text-left">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="h-4 w-4" />
+                    <span className="font-semibold">Journal</span>
+                    <Badge variant="secondary">{journals.length}</Badge>
+                    <span className="text-xs text-muted-foreground">auto-generated nightly</span>
+                  </div>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${journalOpen ? "rotate-180" : ""}`} />
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="grid gap-3 border-t p-4 sm:grid-cols-2">
+                    {journals.map((m) => (
+                      <MemoryCard key={m.id} m={m} onEdit={() => { setDraft(m); setOpen(true); }} onDelete={() => handleDelete(m.id)} />
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+          )}
+
           {KINDS.filter((k) => grouped[k]?.length).map((kind) => (
             <div key={kind} className="space-y-3">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{kind}</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 {grouped[kind].map((m) => (
-                  <Card key={m.id} className="flex flex-col">
-                    <CardHeader>
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <CardTitle className="text-base">{m.title}</CardTitle>
-                          <p className="mt-1 font-mono text-xs text-muted-foreground">{m.slug}</p>
-                        </div>
-                        <Badge variant="secondary">{m.kind}</Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="flex-1 space-y-3">
-                      <pre className="max-h-40 overflow-hidden whitespace-pre-wrap text-xs text-muted-foreground">
-                        {m.content.slice(0, 400)}{m.content.length > 400 ? "…" : ""}
-                      </pre>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => { setDraft(m); setOpen(true); }}>
-                          <Pencil className="h-3.5 w-3.5" /> Edit
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => handleDelete(m.id)}>
-                          <Trash2 className="h-3.5 w-3.5" /> Delete
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <MemoryCard key={m.id} m={m} onEdit={() => { setDraft(m); setOpen(true); }} onDelete={() => handleDelete(m.id)} />
                 ))}
               </div>
             </div>
           ))}
+
+          {filtered.length === 0 && (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                No memories match "{search}".
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
     </div>
   );
 };
+
+const MemoryCard = ({ m, onEdit, onDelete }: { m: Memory; onEdit: () => void; onDelete: () => void }) => (
+  <Card className="flex flex-col">
+    <CardHeader>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <CardTitle className="truncate text-base">{m.title}</CardTitle>
+          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{m.slug}</p>
+        </div>
+        <Badge variant="secondary">{m.kind}</Badge>
+      </div>
+    </CardHeader>
+    <CardContent className="flex-1 space-y-3">
+      <pre className="max-h-40 overflow-hidden whitespace-pre-wrap text-xs text-muted-foreground">
+        {m.content.slice(0, 400)}{m.content.length > 400 ? "…" : ""}
+      </pre>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-muted-foreground">
+          Updated {new Date(m.updated_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+        </span>
+        <div className="flex gap-1">
+          <Button size="sm" variant="outline" onClick={onEdit}>
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDelete}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+);
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div className="space-y-1.5">

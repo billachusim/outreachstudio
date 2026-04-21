@@ -22,7 +22,15 @@ You help the user manage offerings, campaigns, leads, drafts, and sends.
 You have tools to start campaigns, check status, list leads/events, pause/resume runs, send a single pitch, draft pitches, score leads, post to social channels, summarize the day, and read/write your own persistent memory files.
 Be concise and direct. Use markdown. When the user asks about progress, call get_run_status, list_recent_events, or summarize_today first.
 Never invent leads, counts, or campaign names — always call a tool. If a tool returns nothing useful, say so plainly.
-When the user shares a preference, a new fact about a product, or asks you to remember something, call write_memory to persist it. When unsure who Bill is or what a product does, call read_memory or list_memories before guessing.`;
+When the user shares a preference, a new fact about a product, or asks you to remember something, call write_memory to persist it. When unsure who Bill is or what a product does, call read_memory or list_memories before guessing.
+
+## Learning loop (important)
+You own your memory and must keep it useful over time:
+- When you spot a recurring failure, a winning subject line, a new product detail Bill mentions, or an objection pattern → call **append_memory** to add a dated bullet to the relevant playbook (cheaper + safer than rewriting the whole file).
+- For a brand-new topic with no existing file, call **write_memory** with a kebab-case slug like \`objections-retailos\`, \`winning-subjects\`, \`lessons-learned\`, \`tone-feedback\`. Use kind \`playbook\` for SOPs, \`note\` for everything else.
+- If a memory file is stale or wrong, call **delete_memory** or **rename_memory**.
+- Before dumping all memories into context, prefer **search_memories** with a focused query.
+- Always read \`journal-rollup\` (rolling 7-day recap) before suggesting strategy. Read the latest \`daily-journal-*\` for yesterday's specifics.`;
 
 const TOOLS = [
   { type: "function", function: { name: "list_campaigns", description: "List the user's campaigns.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
@@ -46,7 +54,11 @@ const TOOLS = [
   { type: "function", function: { name: "find_similar_leads", description: "Find leads with similar category/keywords to the given lead.", parameters: { type: "object", properties: { lead_id: { type: "string" }, limit: { type: "number", default: 10 } }, required: ["lead_id"], additionalProperties: false } } },
   { type: "function", function: { name: "list_memories", description: "List all persistent memory files.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "read_memory", description: "Read a memory file by slug.", parameters: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"], additionalProperties: false } } },
-  { type: "function", function: { name: "write_memory", description: "Create or update a persistent memory file.", parameters: { type: "object", properties: { slug: { type: "string" }, title: { type: "string" }, kind: { type: "string", enum: ["identity", "personality", "portfolio", "playbook", "note"] }, content: { type: "string" } }, required: ["slug", "title", "kind", "content"], additionalProperties: false } } },
+  { type: "function", function: { name: "write_memory", description: "Create or update a persistent memory file (full content replace).", parameters: { type: "object", properties: { slug: { type: "string" }, title: { type: "string" }, kind: { type: "string", enum: ["identity", "personality", "portfolio", "playbook", "note"] }, content: { type: "string" } }, required: ["slug", "title", "kind", "content"], additionalProperties: false } } },
+  { type: "function", function: { name: "append_memory", description: "Append a dated bullet (or block) to an existing memory file. Cheaper + safer than rewriting. Auto-prefixes with today's date.", parameters: { type: "object", properties: { slug: { type: "string" }, content: { type: "string" } }, required: ["slug", "content"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_memory", description: "Delete a memory file by slug. Use for stale or duplicate notes.", parameters: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"], additionalProperties: false } } },
+  { type: "function", function: { name: "rename_memory", description: "Rename a memory's slug and/or title.", parameters: { type: "object", properties: { slug: { type: "string" }, new_slug: { type: "string" }, new_title: { type: "string" } }, required: ["slug"], additionalProperties: false } } },
+  { type: "function", function: { name: "search_memories", description: "Search memory files by case-insensitive substring across title, slug, and content. Returns matching slugs + snippets.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number", default: 8 } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "list_recent_intel", description: "List recent intel items (news triggers) for the user, newest first. Use to find the right intel item before drafting a pitch.", parameters: { type: "object", properties: { limit: { type: "number", default: 10 }, min_score: { type: "number" }, only_unactioned: { type: "boolean", default: true } }, additionalProperties: false } } },
   { type: "function", function: { name: "draft_pitch_from_intel", description: "Draft a PR/outreach pitch grounded in a specific intel item (news headline). Pass either intel_item_id, OR a headline_query to fuzzy-match the latest intel by title. Optionally pin to an offering and lead. If save=true, persists the pitch on the lead as a draft.", parameters: { type: "object", properties: { intel_item_id: { type: "string" }, headline_query: { type: "string" }, offering_id: { type: "string" }, lead_id: { type: "string" }, save: { type: "boolean", default: false } }, additionalProperties: false } } },
 ];
@@ -197,6 +209,47 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
       }
       const { error } = await supabase.from("agent_memories").insert({ user_id: userId, slug, title, kind, content });
       return error ? { error: error.message } : { ok: true, created: slug };
+    }
+    case "append_memory": {
+      const { slug, content } = args;
+      const { data: existing } = await supabase.from("agent_memories").select("id, content").eq("user_id", userId).eq("slug", slug).maybeSingle();
+      const today = new Date().toISOString().slice(0, 10);
+      const block = `\n\n_${today}_ — ${content}`;
+      if (!existing) {
+        const { error } = await supabase.from("agent_memories").insert({
+          user_id: userId, slug, title: slug, kind: "note", content: `# ${slug}${block}`,
+        });
+        return error ? { error: error.message } : { ok: true, created: slug };
+      }
+      const newContent = (existing.content ?? "") + block;
+      const { error } = await supabase.from("agent_memories").update({ content: newContent }).eq("id", existing.id);
+      return error ? { error: error.message } : { ok: true, appended: slug, length: newContent.length };
+    }
+    case "delete_memory": {
+      const { error } = await supabase.from("agent_memories").delete().eq("user_id", userId).eq("slug", args.slug);
+      return error ? { error: error.message } : { ok: true, deleted: args.slug };
+    }
+    case "rename_memory": {
+      const update: any = {};
+      if (args.new_slug) update.slug = args.new_slug;
+      if (args.new_title) update.title = args.new_title;
+      if (!Object.keys(update).length) return { error: "Provide new_slug or new_title" };
+      const { error } = await supabase.from("agent_memories").update(update).eq("user_id", userId).eq("slug", args.slug);
+      return error ? { error: error.message } : { ok: true, renamed: args.slug, to: update };
+    }
+    case "search_memories": {
+      const q = String(args.query ?? "").trim();
+      if (!q) return [];
+      const { data } = await supabase.from("agent_memories")
+        .select("slug, title, kind, content, updated_at")
+        .eq("user_id", userId)
+        .or(`title.ilike.%${q}%,slug.ilike.%${q}%,content.ilike.%${q}%`)
+        .limit(args.limit ?? 8);
+      return (data ?? []).map((m: any) => {
+        const idx = m.content.toLowerCase().indexOf(q.toLowerCase());
+        const snippet = idx >= 0 ? m.content.slice(Math.max(0, idx - 60), idx + 200) : m.content.slice(0, 200);
+        return { slug: m.slug, title: m.title, kind: m.kind, snippet, updated_at: m.updated_at };
+      });
     }
     case "list_recent_intel": {
       let q = supabase.from("intel_items")

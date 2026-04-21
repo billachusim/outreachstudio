@@ -137,6 +137,46 @@ Condensed SOPs from the Browser Operations Protocol. Use these to decide which a
 - **Status:** READY TO BUILD (Firecrawl + scheduled cron).
 `,
   },
+  {
+    slug: "learning-loop",
+    title: "Learning loop — how the agent grows its memory",
+    kind: "playbook",
+    content: `# Learning loop
+
+The agent reads ALL memory files at the start of every chat. Keep them small, current, and high-signal.
+
+## When to write what
+
+| Situation | Tool | Slug convention |
+|---|---|---|
+| Recurring failure pattern (bounce, dead campaign) | \`append_memory\` | \`lessons-learned\` |
+| A subject line that got a reply | \`append_memory\` | \`winning-subjects\` |
+| Bill mentions a new product fact | \`append_memory\` (existing portfolio) or \`write_memory\` | reuse existing |
+| Objection a prospect raised | \`append_memory\` | \`objections-<product>\` (e.g. \`objections-retailos\`) |
+| Tone correction Bill gives | \`append_memory\` | \`tone-feedback\` |
+| Brand-new playbook | \`write_memory\` kind=\`playbook\` | descriptive kebab-case |
+
+## Conventions
+
+- **Append > rewrite.** \`append_memory\` is cheaper and preserves history. Only \`write_memory\` when restructuring.
+- **Kebab-case slugs only.** \`winning-subjects\`, not \`Winning Subjects\`.
+- **Date your appends.** The append tool auto-prefixes \`_YYYY-MM-DD_\` for you.
+- **Search before listing.** Use \`search_memories("retailos")\` instead of dumping everything.
+- **Delete stale notes.** If something is wrong or duplicated, \`delete_memory\`.
+
+## Auto-generated files (do not edit by hand)
+
+- \`daily-journal-YYYY-MM-DD\` — written nightly by the daily-journal job. Last 14 kept.
+- \`journal-rollup\` — rolling 7-day recap, regenerated nightly.
+- \`weekly-journal-YYYY-Www\` — Sunday digest, last 8 weeks kept.
+
+## Daily routine for the agent
+
+1. Read \`journal-rollup\` for the 7-day picture.
+2. Read the latest \`daily-journal-*\` for yesterday's specifics.
+3. Act. As you act, append insights to the right playbook.
+`,
+  },
 ];
 
 export async function seedAgentMemoryIfEmpty(userId: string, force = false) {
