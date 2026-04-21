@@ -1,120 +1,115 @@
 
 
-# Raw leads pool + CSV bulk upload + smart pre-discovery match
+# Fetch Leads — global, context-aware lead discovery (revised)
 
-Right now every lead is tied to a campaign at creation time, so there's no shared pool to draw from. We'll add a **raw leads** concept (unassigned leads), let you upload CSVs, and have campaigns search the pool *before* spending Firecrawl/Google Places credits.
+A new **`✨ Fetch leads`** button on the Leads page that runs one big AI-driven discovery sweep. Reads everything the system knows (memory, offerings, intel, campaigns, region) and pulls fresh raw leads from Firecrawl, biased to your region (Nigeria-first, Africa-wide).
 
----
+## Efficiency-first limits (revised)
 
-## Part 1 — Raw leads (unassigned)
+Instead of a flat 100-lead cap, we optimize around **Firecrawl spend** — the actual cost driver. One Firecrawl search returns up to 20 results for a single credit, so **8 well-crafted queries ≈ 8 credits ≈ up to 160 raw candidates**. We keep what we find.
 
-A "raw lead" is just `leads.campaign_id = NULL`. Schema already supports this — we only need to expose it in the UI and let the system use it.
+| Knob | Value | Why |
+|---|---|---|
+| AI-planned search queries | **6–10** (target 8) | Sweet spot for coverage without burning credits |
+| Firecrawl results per query | **20** (max) | Same cost as 5 results — no reason to ask for less |
+| Concurrent Firecrawl calls | **4** | Respects API rate limits, finishes in ~15s |
+| Hard ceiling on inserted leads | **200** | Safety net only — virtually never hit if queries are good |
+| Soft target | **~120 raw leads** | What 8 queries naturally yield after dedupe/blocklist |
+| Initial enrichment burst | **top 25 candidates** by signal strength | Surfaces 70–90 score leads same run; ~25 cheap scrapes |
+| Stop conditions (any one ends the run) | • Hit 200 inserted<br>• All planned queries done<br>• User clicks Stop<br>• Firecrawl returns 402 (out of credits) | Whichever comes first |
 
-**Leads page changes (`src/pages/Leads.tsx`):**
-- New campaign filter option at the top: **`📥 Raw leads (unassigned)`** — selects `campaign_id IS NULL`. Default landing view stays "All campaigns" but the chip is one click away.
-- Counter strip gets a 5th stat: *"23 raw"* (unassigned total).
-- New tab: **`📥 Raw`** (alongside Hot / Ready / Needs / Replied / Won) — same as the campaign filter, just a tab shortcut.
-- The "Add lead" dialog's Campaign dropdown gets a top option: **`— Raw lead (no campaign) —`**. Selecting it inserts with `campaign_id: null`.
-- Selecting raw leads in the table reveals a new bulk action button: **`Assign to campaign…`** → small popover with a campaign select → bulk update `campaign_id`.
+**Net cost per Fetch run:** ~8 search credits + up to 25 scrape credits ≈ **~33 Firecrawl credits**. Plus 1 cheap `gemini-2.5-flash` planning call + up to 25 `gemini-2.5-flash-lite` contact-name calls.
 
-**Lead detail drawer (`src/components/LeadDetailDrawer.tsx`):**
-- Add a "Campaign" row that's editable: shows current campaign name (or "Raw — unassigned") with a small `Change` button → opens a select to reassign or detach (set to NULL).
+**Why this is more efficient than "cap at 100":** Capping inserts means we waste already-paid-for search results. Capping queries instead means we cap *spend*, and keep every lead the spend produced.
 
----
+## What you'll see
 
-## Part 2 — CSV / spreadsheet bulk upload
-
-A new **`Import leads`** button next to "Add lead" on the Leads page. Opens a dialog:
+**Leads page** — next to Import CSV / Add lead:
 
 ```
-┌─ Import leads from CSV ───────────────────────┐
-│  [ Drop file or click to browse ]   .csv      │
-│                                                │
-│  Assign to:  ◉ Raw leads (no campaign)         │
-│              ○ Specific campaign ▼             │
-│                                                │
-│  Detected 47 rows · Preview:                   │
-│  ┌─────────────────────────────────────────┐  │
-│  │ Business     │ Email          │ Phone   │  │
-│  │ Acme Lounge  │ hi@acme.ng    │ 0801…   │  │
-│  └─────────────────────────────────────────┘  │
-│                                                │
-│  Column mapping (auto-detected):               │
-│  business_name ← "Name" ▼                      │
-│  contact_email ← "Email" ▼                     │
-│  phone         ← "Phone Number" ▼              │
-│  website       ← "Website" ▼                   │
-│  contact_name  ← (skip) ▼                      │
-│  address       ← (skip) ▼                      │
-│  notes         ← (skip) ▼                      │
-│                                                │
-│  ☑ Skip duplicates by email/website            │
-│                  [Cancel]  [Import 47 leads]   │
-└────────────────────────────────────────────────┘
+[ ✨ Fetch leads ]                     ← idle
+[ ⏳ Fetching… 87 found · 19 hot ]      ← live, click for details
 ```
 
-**How it works:**
-- Pure client-side parsing using `papaparse` (small, ~45kb, npm-installable). Parses CSV in the browser — no backend roundtrip until insert.
-- Auto-maps columns by header name (case-insensitive fuzzy: `business`, `name`, `company` → `business_name`; `email`, `e-mail` → `contact_email`; etc.). User can override each mapping.
-- Shows a preview of first 5 rows so the user verifies the mapping is right.
-- Dedupe option (default on): skip rows whose `contact_email` or `website` root domain already exists in the user's leads.
-- Inserts in batches of 100 via the standard supabase client (RLS handles user_id). Auto-score trigger fires per row, so imported leads get real scores immediately based on what columns they include.
-- Success toast: *"Imported 42 leads (5 skipped as duplicates)"*. Refreshes the table.
+Click while running → popover with:
+- Progress bar (queries done / planned)
+- Live counters: queries run, candidates seen, inserted, high-quality (≥50)
+- Current search query being executed
+- `Stop` button (graceful — finishes current query then exits)
 
-**Files:** new `src/components/ImportLeadsDialog.tsx`, edit `src/pages/Leads.tsx` to add the button. Add `papaparse` + `@types/papaparse` to `package.json`.
+Newly inserted leads stream into the **Raw** tab as they land (Realtime).
 
----
+**Studio dashboard** — a new **"Lead fetch run"** card above Active runs, only when a run is in-flight or finished within last 24h. Same counters + "View raw leads →" link. Done state shows: *"Fetched 134 raw leads (28 high-quality) · 8 queries · ~33 credits"*.
 
-## Part 3 — Pre-discovery: campaigns mine the raw pool first
+## How it works (one click → a lot happens)
 
-When a campaign run hits the `discovering` state, before calling Firecrawl/Google Places, it now does a **raw-pool sweep**:
+1. **Gather context** server-side:
+   - `profiles.outreach_region` + `outreach_country_code` (Nigeria / ng)
+   - All `agent_memories` (slug + title + content snippet)
+   - All `offerings` (title, target_audience, problem_solved, ideal_customer, trigger_keywords)
+   - Recent high-relevance `intel_items` (last 30d, score ≥40 — title + tags)
+   - All `campaigns` (name, category, keywords, city)
 
-**New step in `supabase/functions/campaign-tick/index.ts` (start of `discovering` branch, before the existing source-specific code):**
+2. **AI plans the search** (one `gemini-2.5-flash` call):
+   Returns a structured JSON of **6–10 queries** + ICP labels (e.g. *"boutique hotels in Lagos"*, *"fintech startups Nigeria"*, *"D2C fashion West Africa"*). Each query goes through `buildRegionalQuery` + `firecrawlLocationParam`. For Nigeria-region: 60% Nigeria-specific, 30% other African countries (GH/KE/ZA/EG), 10% diaspora.
 
-1. Fetch up to `target_lead_count - have` raw leads (`campaign_id IS NULL`, same `user_id`) ordered by score DESC.
-2. For each, score how well it matches the campaign:
-   - **Keyword match**: campaign `keywords` and `category` terms checked against lead `business_name + notes + enrichment_summary` (case-insensitive substring + word-boundary). Each hit = +1.
-   - **Region match**: lead `address` or `website` TLD aligned with the user's `outreach_country_code` = +2.
-   - Threshold: needs ≥1 keyword hit OR (city match + ≥1 weak signal). If campaign has no keywords/category at all (rare for AI-generated ones now that we require it), fall back to "any raw lead in region".
-3. Bulk-attach matched leads: `UPDATE leads SET campaign_id = <run.campaign_id> WHERE id IN (...)`. They keep their existing `status` and `score`.
-4. Log: `run_events.kind = 'reused_from_pool'`, message *"Reused 7 raw leads matching campaign keywords (saving Firecrawl credits)."*
-5. Recount and only fall through to Firecrawl/Places if `have < target_lead_count` after the sweep.
+3. **Run Firecrawl searches in parallel** — 4 concurrent, 20 results each. Background loop keeps going until all queries done or hard ceiling (200) hit.
 
-**Net effect:** Re-uses the cheap pool first; only spends external API credits to fill the gap. Imported CSV leads automatically get pulled into the next matching campaign.
+4. **Filter + dedupe** as results arrive:
+   - Drop blocklisted hosts (`HOST_BLOCKLIST`)
+   - Drop `.edu`/`.gov`/non-target country TLDs once we have plenty of local
+   - Drop existing leads (any campaign or raw) by root domain
+   - Stop inserting at 200 (safety net)
 
-A small **"Match score"** for matched leads stays the same — they don't get re-enriched if `last_enriched_at` is set; otherwise they enter the normal enriching state.
+5. **Insert as raw leads** (`campaign_id: null`) with notes snippet. Auto-score trigger fires per insert.
 
----
+6. **Enrichment burst** — top **25 candidates** by initial signal strength (long description, clear business name, target-region TLD) get a single `enrich-lead` call each. This finds emails/phones/socials and pushes those leads to 70–90 scores.
 
-## Part 4 — Schema + safety
+## Real-time progress
 
-No schema changes. Everything works against the existing `leads.campaign_id NULL` shape.
+New table `lead_fetch_runs`:
 
-**RLS:** existing `own leads` policies already cover NULL campaign_id (they key on `user_id`). No policy changes.
+```sql
+create table public.lead_fetch_runs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  state text not null default 'planning',          -- planning | searching | enriching | done | failed | stopped
+  hard_ceiling int not null default 200,
+  queries_planned int not null default 0,
+  queries_run int not null default 0,
+  candidates_seen int not null default 0,
+  inserted_count int not null default 0,
+  high_quality_count int not null default 0,       -- score ≥50
+  enriched_count int not null default 0,
+  current_query text,
+  credits_estimate int not null default 0,
+  error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- RLS: own rows only, enabled on supabase_realtime publication
+```
 
-**Migration:** none.
-
-**Safety nets:**
-- Bulk reassignment is a single SQL update wrapped client-side; if it fails the toast surfaces the error, no partial state.
-- Pool sweep only attaches leads — it never deletes, never overwrites status, never modifies the lead's identity.
-- Imported leads with no email/phone start at score 0–10 and naturally drop to the bottom of every view; they only get enriched once attached to a campaign.
-
----
+Frontend subscribes via Realtime — no polling.
 
 ## Files to change
 
-**Frontend**
-- Edit `src/pages/Leads.tsx` — Raw leads filter chip + tab + counter, Campaign dropdown gets "no campaign" option, new "Import leads" button, bulk "Assign to campaign" action when raw leads are selected.
-- Edit `src/components/LeadDetailDrawer.tsx` — editable Campaign field (reassign or detach).
-- New `src/components/ImportLeadsDialog.tsx` — CSV upload, column mapping, preview, dedupe, batched insert.
-- Edit `package.json` — add `papaparse` and `@types/papaparse`.
-
 **Backend**
-- Edit `supabase/functions/campaign-tick/index.ts` — insert raw-pool sweep at the top of the `discovering` state before the Firecrawl/Places branches.
+- New edge function `supabase/functions/fetch-leads/index.ts` — context gather → AI plan → Firecrawl loop → insert → enrichment burst → updates `lead_fetch_runs`. Returns immediately after creating the run row; uses `EdgeRuntime.waitUntil` to keep work going in background. Checks `state='stopped'` between queries for graceful cancellation. Catches Firecrawl 402 → state=`failed`, error=`"Firecrawl credits exhausted"`.
+- Edit `supabase/functions/_shared/enrichment.ts` — add `buildAfricanRegionalQuery(baseQuery, region)` that, for `ng/ke/gh/za/eg`, expands to multi-country bias.
+- New migration: `lead_fetch_runs` table + RLS + add to realtime publication.
 
-## Cost & UX
+**Frontend**
+- Edit `src/pages/Leads.tsx` — `Fetch leads` button + live progress popover, Realtime subscription on active `lead_fetch_runs` row, auto-refresh leads on insert events, `Stop` button.
+- New `src/components/FetchLeadsProgress.tsx` — progress UI, reused on Leads page and Dashboard.
+- Edit `src/pages/Dashboard.tsx` — render `FetchLeadsProgress` card above "Active runs" when an in-flight or recent (last 24h) `lead_fetch_runs` row exists.
 
-- **Cost saved:** Every raw lead reused = one fewer Firecrawl search credit + one fewer enrichment scrape. A 100-lead CSV upload could power 2 full campaigns with zero discovery spend.
-- **UI noise:** Default Leads view is unchanged for users who don't care — the raw-leads features are progressive (chip, tab, button).
-- **Backward compatible:** All existing campaign-attached leads stay exactly as they are.
+## Cost & safety
+
+- **Firecrawl per Fetch run:** ~33 credits (8 searches + 25 scrapes).
+- **AI per Fetch run:** 1 cheap planning call + ≤25 micro contact-name calls. Negligible.
+- **Hard safety ceiling:** 200 inserted leads. In practice almost never reached after dedupe — natural ceiling is ~120–140.
+- **402 handling:** if Firecrawl returns "out of credits", the run halts, state=`failed`, the popover shows a clear "Firecrawl credits exhausted — top up to continue" message.
+- **Concurrency guard:** only one in-flight `lead_fetch_runs` per user; button disabled while `state ∈ {planning, searching, enriching}`.
+- **Stop button:** sets `state='stopped'`; loop checks before each query batch and exits gracefully (already-inserted leads stay).
 
