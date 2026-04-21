@@ -305,6 +305,114 @@ async function firecrawlScrape(apiKey: string, url: string, location: ReturnType
   };
 }
 
+// Lightweight scrape for aggregator pages — markdown + links only (no AI summary).
+async function firecrawlScrapeAggregator(apiKey: string, url: string): Promise<{ markdown: string; links: string[] } | null> {
+  try {
+    const res = await fetch(`${FIRECRAWL_V2}/scrape`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ url, formats: ["markdown", "links"], onlyMainContent: true }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const markdown: string = data?.data?.markdown ?? data?.markdown ?? "";
+    const links: string[] = data?.data?.links ?? data?.links ?? [];
+    if (!markdown && (!links || links.length === 0)) return null;
+    return { markdown, links: Array.isArray(links) ? links : [] };
+  } catch (e) {
+    console.error(`Aggregator scrape failed for ${url}`, e);
+    return null;
+  }
+}
+
+type ExtractedBusiness = { name: string; website?: string | null; snippet?: string | null };
+
+// AI extracts businesses mentioned in a listicle/blog page.
+async function extractBusinessesFromPage(
+  apiKey: string,
+  ctx: { url: string; title: string; markdown: string; links: string[] },
+): Promise<{ businesses: ExtractedBusiness[]; is_listicle: boolean; list_topic: string }> {
+  const trimmedMd = (ctx.markdown ?? "").slice(0, 12000);
+  const trimmedLinks = (ctx.links ?? []).slice(0, 80);
+  const sys = `You extract individual businesses/organisations mentioned in articles, listicles, blog posts, or directory pages. Only return real businesses with their own websites — skip the publisher's own site, social media handles, generic categories, and aggregators.`;
+  const user = `PAGE URL: ${ctx.url}
+PAGE TITLE: ${ctx.title}
+
+OUTBOUND LINKS ON PAGE (use to resolve mentioned business names to websites):
+${trimmedLinks.map((l) => `- ${l}`).join("\n") || "(none)"}
+
+PAGE CONTENT (markdown):
+${trimmedMd}
+
+Extract every distinct business/organisation mentioned. For each:
+- name: official business name (cleaned)
+- website: homepage URL (resolve from outbound links if not inline; null if not findable)
+- snippet: 1-line description of why they were mentioned
+
+Cap at ${MAX_BUSINESSES_PER_AGGREGATOR}. Skip the publisher itself and any aggregator/directory hosts.`;
+
+  try {
+    const res = await fetch(LOVABLE_AI, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "extract_businesses",
+            description: "Return businesses mentioned in the page.",
+            parameters: {
+              type: "object",
+              properties: {
+                is_listicle: { type: "boolean" },
+                list_topic: { type: "string", description: "Short topic of the list/article" },
+                businesses: {
+                  type: "array",
+                  maxItems: MAX_BUSINESSES_PER_AGGREGATOR,
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      website: { type: ["string", "null"] },
+                      snippet: { type: ["string", "null"] },
+                    },
+                    required: ["name"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["is_listicle", "list_topic", "businesses"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "extract_businesses" } },
+      }),
+    });
+    if (!res.ok) {
+      console.error(`extract_businesses failed: ${res.status}`);
+      return { businesses: [], is_listicle: false, list_topic: "" };
+    }
+    const data = await res.json();
+    const args = data?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    if (!args) return { businesses: [], is_listicle: false, list_topic: "" };
+    const parsed = JSON.parse(args);
+    return {
+      businesses: Array.isArray(parsed.businesses) ? parsed.businesses.slice(0, MAX_BUSINESSES_PER_AGGREGATOR) : [],
+      is_listicle: !!parsed.is_listicle,
+      list_topic: typeof parsed.list_topic === "string" ? parsed.list_topic : "",
+    };
+  } catch (e) {
+    console.error("extract_businesses error", e);
+    return { businesses: [], is_listicle: false, list_topic: "" };
+  }
+}
+
 async function runFetch(
   supabase: any,
   runId: string,
