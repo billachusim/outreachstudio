@@ -135,6 +135,10 @@ const Leads = () => {
 
   const handleCreate = async () => {
     if (!user || !draft.business_name?.trim()) return;
+    // campaign_id: explicitly null if user picked "no campaign", else the chosen one, else inherit URL filter (unless filter is RAW)
+    let cid: string | null = null;
+    if (draft.campaign_id !== undefined) cid = draft.campaign_id;
+    else if (campaignFilter && campaignFilter !== RAW_VALUE) cid = campaignFilter;
     const { error } = await supabase.from("leads").insert({
       user_id: user.id,
       business_name: draft.business_name,
@@ -145,11 +149,22 @@ const Leads = () => {
       address: draft.address ?? null,
       notes: draft.notes ?? null,
       status: (draft.status ?? "new") as LeadStatus,
-      campaign_id: draft.campaign_id ?? campaignFilter ?? null,
+      campaign_id: cid,
     } as never);
     if (error) return toast({ title: "Create failed", description: error.message, variant: "destructive" });
     setOpen(false);
-    setDraft({ business_name: "", status: "new" });
+    setDraft({ business_name: "", status: "new", campaign_id: null });
+    load();
+  };
+
+  const bulkAssign = async (newCampaignId: string | null) => {
+    if (selected.size === 0) return;
+    const ids = Array.from(selected);
+    const { error } = await supabase.from("leads").update({ campaign_id: newCampaignId }).in("id", ids);
+    if (error) return toast({ title: "Assign failed", description: error.message, variant: "destructive" });
+    toast({ title: newCampaignId ? "Assigned to campaign" : "Detached to raw pool", description: `${ids.length} lead${ids.length === 1 ? "" : "s"} updated.` });
+    setSelected(new Set());
+    setAssignTarget("");
     load();
   };
 
@@ -186,11 +201,14 @@ const Leads = () => {
         <div>
           <h1 className="text-xl font-semibold sm:text-2xl">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready to send</span> · {counters.needs} need enrichment
+            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready</span> · {counters.needs} need enrichment · <span className="text-foreground">{counters.raw} raw</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="gap-1"><Globe className="h-3 w-3" />Region: {region}</Badge>
+          <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload className="h-4 w-4" /> Import CSV
+          </Button>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4" /> Add lead</Button></DialogTrigger>
             <DialogContent className="max-h-[85vh] overflow-y-auto">
@@ -198,9 +216,15 @@ const Leads = () => {
               <div className="grid gap-4">
                 <div className="space-y-1.5"><Label>Business name</Label><Input value={draft.business_name ?? ""} onChange={(e) => setDraft({ ...draft, business_name: e.target.value })} /></div>
                 <div className="space-y-1.5"><Label>Campaign</Label>
-                  <Select value={draft.campaign_id ?? campaignFilter ?? undefined} onValueChange={(v) => setDraft({ ...draft, campaign_id: v })}>
+                  <Select
+                    value={draft.campaign_id === null ? NO_CAMPAIGN : (draft.campaign_id ?? (campaignFilter && campaignFilter !== RAW_VALUE ? campaignFilter : NO_CAMPAIGN))}
+                    onValueChange={(v) => setDraft({ ...draft, campaign_id: v === NO_CAMPAIGN ? null : v })}
+                  >
                     <SelectTrigger><SelectValue placeholder="Select campaign" /></SelectTrigger>
-                    <SelectContent>{campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      <SelectItem value={NO_CAMPAIGN}>— Raw lead (no campaign) —</SelectItem>
+                      {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -228,9 +252,10 @@ const Leads = () => {
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, domain…" className="pl-9" />
         </div>
         <Select value={campaignFilter ?? "all"} onValueChange={(v) => v === "all" ? setParams({}) : setParams({ campaign: v })}>
-          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Campaign" /></SelectTrigger>
+          <SelectTrigger className="w-[200px]"><SelectValue placeholder="Campaign" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All campaigns</SelectItem>
+            <SelectItem value={RAW_VALUE}>📥 Raw leads (unassigned)</SelectItem>
             {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
