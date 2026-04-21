@@ -149,28 +149,60 @@ Plan 6-10 search queries to find real prospect websites for my offerings.`;
 
 type FirecrawlHit = { url: string; title?: string; description?: string };
 
-async function firecrawlSearch(apiKey: string, query: string, location: ReturnType<typeof firecrawlLocationParam>): Promise<{ results: FirecrawlHit[]; outOfCredits: boolean }> {
+async function firecrawlSearch(
+  apiKey: string,
+  query: string,
+  location: string | null,
+): Promise<{ results: FirecrawlHit[]; outOfCredits: boolean; status: number }> {
+  const body: Record<string, unknown> = { query, limit: QUERY_RESULTS };
+  if (location) body.location = location;
   const res = await fetch(`${FIRECRAWL_V2}/search`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ query, limit: QUERY_RESULTS, location }),
+    body: JSON.stringify(body),
   });
-  if (res.status === 402) return { results: [], outOfCredits: true };
+  if (res.status === 402) return { results: [], outOfCredits: true, status: 402 };
   if (!res.ok) {
-    console.error(`Firecrawl search failed: ${res.status}`, await res.text().catch(() => ""));
-    return { results: [], outOfCredits: false };
+    const txt = await res.text().catch(() => "");
+    console.error(`Firecrawl search failed: ${res.status}`, txt);
+    return { results: [], outOfCredits: false, status: res.status };
   }
   const data = await res.json();
   const web = data?.data?.web ?? data?.data ?? data?.web ?? [];
-  const hits = (Array.isArray(web) ? web : []).map((r: any) => ({
-    url: r.url,
-    title: r.title,
-    description: r.description,
-  })).filter((h: FirecrawlHit) => h.url);
-  return { results: hits, outOfCredits: false };
+  const hits = (Array.isArray(web) ? web : [])
+    .map((r: any) => ({ url: r.url, title: r.title, description: r.description }))
+    .filter((h: FirecrawlHit) => h.url);
+  return { results: hits, outOfCredits: false, status: 200 };
 }
 
-async function firecrawlScrape(apiKey: string, url: string, location: ReturnType<typeof firecrawlLocationParam>) {
+// Robust search: tries regional → without location → bare query.
+// Returns the first non-empty result set (or last attempt's result).
+async function robustSearch(
+  apiKey: string,
+  baseQuery: string,
+  region: RegionContext,
+  location: string,
+): Promise<{ results: FirecrawlHit[]; outOfCredits: boolean; attempts: number }> {
+  const regional = buildAfricanRegionalQuery(baseQuery, region);
+  const variants: Array<{ q: string; loc: string | null }> = [
+    { q: regional, loc: location },        // 1. AI-enhanced + region location
+    { q: regional, loc: null },            // 2. AI-enhanced, no location
+    { q: baseQuery, loc: location },       // 3. Bare query + region
+    { q: baseQuery, loc: null },           // 4. Bare query, no location
+  ];
+  let attempts = 0;
+  let lastResults: FirecrawlHit[] = [];
+  for (const v of variants) {
+    attempts += 1;
+    const r = await firecrawlSearch(apiKey, v.q, v.loc);
+    if (r.outOfCredits) return { results: [], outOfCredits: true, attempts };
+    if (r.results.length > 0) return { results: r.results, outOfCredits: false, attempts };
+    lastResults = r.results;
+  }
+  return { results: lastResults, outOfCredits: false, attempts };
+}
+
+async function firecrawlScrape(apiKey: string, url: string, location: ReturnType<typeof firecrawlScrapeLocation>) {
   const res = await fetch(`${FIRECRAWL_V2}/scrape`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
