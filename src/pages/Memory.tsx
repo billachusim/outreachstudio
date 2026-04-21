@@ -341,7 +341,12 @@ const MemoryCard = ({ m, onEdit, onDelete }: { m: Memory; onEdit: () => void; on
           <CardTitle className="truncate text-base">{m.title}</CardTitle>
           <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{m.slug}</p>
         </div>
-        <Badge variant="secondary">{m.kind}</Badge>
+        <div className="flex flex-col items-end gap-1">
+          <Badge variant="secondary">{m.kind}</Badge>
+          {STARTER_SLUGS.includes(m.slug) && (
+            <Badge variant="outline" className="text-[10px]" title="Will be overwritten by 'Reset starters'">starter</Badge>
+          )}
+        </div>
       </div>
     </CardHeader>
     <CardContent className="flex-1 space-y-3">
