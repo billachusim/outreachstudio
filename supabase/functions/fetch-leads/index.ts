@@ -495,6 +495,12 @@ async function runFetch(
     let totalAttempts = 0;
     let totalRetries = 0;
     let lastSearchError: string | undefined;
+    let aggregatorsExploded = 0;
+    let extractedBusinesses = 0;
+
+    type AggregatorHit = { hit: FirecrawlHit; host: string; icp: string };
+    const aggregatorQueue: AggregatorHit[] = [];
+    const seenAggregatorUrls = new Set<string>();
 
     const processBatch = async (batch: PlannedQuery[]): Promise<{ outOfCredits: boolean; batchInserted: number }> => {
       await update({ current_query: batch[0].icp });
@@ -527,6 +533,16 @@ async function runFetch(
           const host = rootDomain(hit.url);
           if (!host) continue;
           if (isBlockedHost(host)) continue;
+
+          // Aggregator/listicle? → queue for explosion, do NOT insert as a lead.
+          if (looksLikeAggregator(hit, host)) {
+            if (!seenAggregatorUrls.has(hit.url) && aggregatorQueue.length < MAX_AGGREGATORS_PER_RUN * 3) {
+              seenAggregatorUrls.add(hit.url);
+              aggregatorQueue.push({ hit, host, icp: q.icp });
+            }
+            continue;
+          }
+
           if (isExcludedTld(host) && totalInserted + newLeads.length > 80) continue;
           if (existingDomains.has(host)) continue;
           existingDomains.add(host);
@@ -590,6 +606,115 @@ async function runFetch(
       }
 
       return { outOfCredits, batchInserted };
+    };
+
+    // Explode queued aggregator/listicle pages into individual business leads.
+    const explodeAggregators = async (): Promise<void> => {
+      if (aggregatorQueue.length === 0) return;
+      if (totalInserted >= hardCeiling - AGGREGATOR_CEILING_GUARD) {
+        log(`Skipping aggregator explosion — within ${AGGREGATOR_CEILING_GUARD} of ceiling`);
+        return;
+      }
+      const regionLc = (region.region || "").toLowerCase();
+      const ranked = [...aggregatorQueue].sort((a, b) => {
+        const ar = (a.hit.title ?? "").toLowerCase().includes(regionLc) ? 1 : 0;
+        const br = (b.hit.title ?? "").toLowerCase().includes(regionLc) ? 1 : 0;
+        return br - ar;
+      }).slice(0, MAX_AGGREGATORS_PER_RUN);
+
+      log(`Exploding ${ranked.length} aggregator page(s) to mine individual businesses`);
+
+      for (let i = 0; i < ranked.length; i += AGGREGATOR_SCRAPE_CONCURRENCY) {
+        if (await checkStopped()) return;
+        if (totalInserted >= hardCeiling) return;
+        const slice = ranked.slice(i, i + AGGREGATOR_SCRAPE_CONCURRENCY);
+
+        await Promise.all(slice.map(async (agg) => {
+          if (totalInserted >= hardCeiling) return;
+          const scraped = await firecrawlScrapeAggregator(firecrawlKey, agg.hit.url);
+          creditsEstimate += SCRAPE_CREDIT_PER_CALL;
+          if (!scraped) {
+            log(`Aggregator scrape failed: ${agg.hit.url}`, "warn");
+            return;
+          }
+          aggregatorsExploded += 1;
+
+          const extracted = await extractBusinessesFromPage(lovableKey, {
+            url: agg.hit.url,
+            title: agg.hit.title ?? "",
+            markdown: scraped.markdown,
+            links: scraped.links,
+          });
+
+          const aggHost = agg.host;
+          const topic = extracted.list_topic || (agg.hit.title ?? "list");
+          const childRows: any[] = [];
+
+          for (const biz of extracted.businesses) {
+            if (totalInserted + childRows.length >= hardCeiling) break;
+            if (!biz.name || biz.name.trim().length < 2) continue;
+            if (!biz.website) continue;
+            const childHost = rootDomain(biz.website);
+            if (!childHost) continue;
+            if (childHost === aggHost) continue;
+            if (isBlockedHost(childHost)) continue;
+            if (isListicleHost(childHost)) continue;
+            if (isExcludedTld(childHost) && totalInserted + childRows.length > 80) continue;
+            if (existingDomains.has(childHost)) continue;
+            existingDomains.add(childHost);
+            extractedBusinesses += 1;
+
+            const snippet = (biz.snippet ?? "").slice(0, 400);
+            const note = `Source: AI fetch — extracted from list "${topic}" on ${aggHost}\n${snippet}`;
+            const signal =
+              (snippet.length > 80 ? 2 : 0) +
+              (childHost.endsWith(`.${region.countryCode}`) ? 3 : 0) + 2;
+
+            childRows.push({
+              user_id: userId,
+              business_name: biz.name.trim().slice(0, 200),
+              website: biz.website,
+              notes: note,
+              status: "new",
+              campaign_id: null,
+              __signal: signal,
+            });
+          }
+
+          if (childRows.length > 0) {
+            const insertRows = childRows.map(({ __signal, ...rest }) => rest);
+            const { data: inserted, error: insErr } = await supabase
+              .from("leads")
+              .insert(insertRows)
+              .select("id,score");
+            if (insErr) {
+              log(`Aggregator insert error: ${insErr.message}`, "error");
+            } else {
+              const inc = inserted?.length ?? 0;
+              totalInserted += inc;
+              (inserted ?? []).forEach((row: any, idx: number) => {
+                candidatesForEnrichment.push({ id: row.id, signal: childRows[idx].__signal });
+              });
+              const hq = (inserted ?? []).filter((r: any) => (r.score ?? 0) >= 50).length;
+              const { data: cur } = await supabase.from("lead_fetch_runs").select("high_quality_count").eq("id", runId).maybeSingle();
+              await update({
+                inserted_count: totalInserted,
+                high_quality_count: (cur?.high_quality_count ?? 0) + hq,
+                aggregators_exploded: aggregatorsExploded,
+                extracted_businesses: extractedBusinesses,
+                credits_estimate: creditsEstimate,
+              });
+              log(`+${inc} leads from list "${topic}" on ${aggHost}`);
+            }
+          } else {
+            await update({
+              aggregators_exploded: aggregatorsExploded,
+              extracted_businesses: extractedBusinesses,
+              credits_estimate: creditsEstimate,
+            });
+          }
+        }));
+      }
     };
 
     // 4. Run searches in batches of MAX_CONCURRENT
