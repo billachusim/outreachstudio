@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, ArrowLeft, Globe } from "lucide-react";
+import { Plus, Trash2, ArrowLeft, Globe, Sparkles, Loader2, RefreshCw, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
-type Source = { id: string; name: string; url: string; enabled: boolean; created_at: string };
+type Source = { id: string; name: string; url: string; enabled: boolean; created_at: string; auto_promoted: boolean };
+type Suggestion = { name: string; url: string; why_relevant: string; type: "news" | "blog" | "directory" | "listicle" };
 
 const DEFAULTS = [
   { name: "Techcabal", url: "https://techcabal.com/" },
@@ -25,6 +26,11 @@ const IntelSources = () => {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(true);
+
+  // Discover state
+  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
+  const [discovering, setDiscovering] = useState(false);
+  const [addingHosts, setAddingHosts] = useState<Set<string>>(new Set());
 
   useEffect(() => { document.title = "Intel sources · Outreach Studio"; }, []);
 
@@ -64,6 +70,44 @@ const IntelSources = () => {
     const { error } = await supabase.from("intel_sources").delete().eq("id", s.id);
     if (error) return toast.error(error.message);
     setSources((p) => p.filter((x) => x.id !== s.id));
+  };
+
+  const discover = async () => {
+    setDiscovering(true);
+    setSuggestions(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("discover-intel-sources", { body: {} });
+      if (error) throw error;
+      const d = data as { suggestions?: Suggestion[]; error?: string };
+      if (d?.error) throw new Error(d.error);
+      const list = d?.suggestions ?? [];
+      setSuggestions(list);
+      if (list.length === 0) toast.info("No new suggestions — try again later or refine your offerings.");
+      else toast.success(`Found ${list.length} new source${list.length === 1 ? "" : "s"} to consider`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Discovery failed");
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const addSuggestion = async (s: Suggestion) => {
+    if (!user) return;
+    const host = (() => { try { return new URL(s.url).hostname; } catch { return s.url; } })();
+    setAddingHosts((p) => new Set(p).add(host));
+    try {
+      const { error } = await supabase.from("intel_sources").insert({
+        user_id: user.id, name: s.name, url: s.url, enabled: true,
+      });
+      if (error) throw error;
+      toast.success(`Added ${s.name}`);
+      setSuggestions((prev) => (prev ?? []).filter((x) => x.url !== s.url));
+      load();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to add");
+    } finally {
+      setAddingHosts((p) => { const n = new Set(p); n.delete(host); return n; });
+    }
   };
 
   return (
@@ -117,6 +161,54 @@ const IntelSources = () => {
       </Card>
 
       <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wand2 className="h-4 w-4 text-primary" /> Discover new sources
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                Find news sites, blogs, and directories that match your offerings and region.
+              </p>
+            </div>
+            <Button size="sm" onClick={discover} disabled={discovering} className="gap-1.5 shrink-0">
+              {discovering ? <Loader2 className="h-4 w-4 animate-spin" /> : suggestions ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+              {discovering ? "Searching…" : suggestions ? "Refresh" : "Discover"}
+            </Button>
+          </div>
+        </CardHeader>
+        {suggestions && (
+          <CardContent>
+            {suggestions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No fresh suggestions right now. Try refreshing or update your offerings.</p>
+            ) : (
+              <ul className="space-y-2">
+                {suggestions.map((s) => {
+                  const host = (() => { try { return new URL(s.url).hostname; } catch { return s.url; } })();
+                  const adding = addingHosts.has(host);
+                  return (
+                    <li key={s.url} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium truncate">{s.name}</p>
+                          <Badge variant="outline" className="text-[10px] capitalize">{s.type}</Badge>
+                        </div>
+                        <a href={s.url} target="_blank" rel="noreferrer" className="block text-xs text-primary truncate hover:underline">{s.url}</a>
+                        <p className="text-xs text-muted-foreground mt-1">{s.why_relevant}</p>
+                      </div>
+                      <Button size="sm" variant="outline" disabled={adding} onClick={() => addSuggestion(s)} className="shrink-0">
+                        {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="h-4 w-4 mr-1" /> Add</>}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle className="text-base">Your sources</CardTitle></CardHeader>
         <CardContent>
           {loading ? (
@@ -128,7 +220,14 @@ const IntelSources = () => {
               {sources.map((s) => (
                 <li key={s.id} className="flex items-center justify-between rounded-md border p-2 gap-3">
                   <div className="min-w-0">
-                    <p className="font-medium truncate">{s.name}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium truncate">{s.name}</p>
+                      {s.auto_promoted && (
+                        <Badge variant="secondary" className="text-[10px] gap-1">
+                          <Sparkles className="h-2.5 w-2.5" /> Auto-promoted
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground truncate">{s.url}</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
