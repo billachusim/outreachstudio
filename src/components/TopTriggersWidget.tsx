@@ -120,17 +120,40 @@ export const TopTriggersWidget = () => {
             </p>
           ) : (
             <ul className="space-y-3">
-              {items.map((it) => (
+              {items.map((it) => {
+                const progress = it.spawned_campaign_id ? runProgress[it.spawned_campaign_id] : null;
+                return (
                 <li key={it.id} className="flex items-start gap-3 rounded-md border p-3">
                   <Badge className="shrink-0">{it.relevance_score ?? 0}</Badge>
                   <div className="flex-1 min-w-0 space-y-1">
                     <p className="text-sm font-medium leading-snug line-clamp-2">{it.title}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{it.source}</p>
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="capitalize">{it.source}</span>
+                      {it.spawned_campaign_id && (
+                        <>
+                          <span>·</span>
+                          <Badge variant="outline" className="h-4 gap-1 px-1.5 text-[10px]">
+                            <Zap className="h-2.5 w-2.5" /> Auto-launched
+                          </Badge>
+                          {progress && (
+                            <span>· {progress.leads_sent}/{progress.target_lead_count} sent · {progress.state}</span>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1.5 shrink-0">
-                    <Button size="sm" variant="default" onClick={() => setLaunchId(it.id)}>
-                      <Rocket className="h-3 w-3 mr-1" /> Launch
-                    </Button>
+                    {it.spawned_campaign_id ? (
+                      <Button asChild size="sm" variant="default">
+                        <Link to={`/campaigns?highlight=${it.spawned_campaign_id}`}>
+                          <BarChart3 className="h-3 w-3 mr-1" /> View campaign
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="default" onClick={() => setLaunchId(it.id)}>
+                        <Rocket className="h-3 w-3 mr-1" /> Launch
+                      </Button>
+                    )}
                     <Button size="sm" variant="secondary" onClick={() => setOpenId(it.id)}>
                       {it.linked_pitch_id ? <FileText className="h-3 w-3 mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
                       {it.linked_pitch_id ? "Pitch ✓" : "Pitch"}
@@ -147,7 +170,8 @@ export const TopTriggersWidget = () => {
                     )}
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </CardContent>
