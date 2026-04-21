@@ -19,7 +19,10 @@ import {
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb, AlertTriangle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+const STARTER_SLUGS = ["identity", "personality", "portfolio", "playbook", "learning-loop"];
 
 type Memory = {
   id: string;
@@ -179,7 +182,19 @@ const Memory = () => {
             size="sm"
             onClick={async () => {
               if (!user) return;
-              if (!confirm("Reset starter memories (identity, personality, portfolio, playbook, learning-loop) to defaults? Your custom notes are not touched.")) return;
+              if (!confirm(
+                "⚠️ OVERWRITE WARNING\n\n" +
+                "This will REPLACE your edits to these 5 starter memories:\n" +
+                "  • identity\n  • personality\n  • portfolio\n  • playbook\n  • learning-loop\n\n" +
+                "Their title, kind and full content will be reset to factory defaults. Any wording you changed in those files will be LOST.\n\n" +
+                "SAFE — these are NOT touched:\n" +
+                "  • Any memory with a different slug (your custom notes)\n" +
+                "  • Daily journals (daily-journal-*)\n" +
+                "  • Weekly digests (weekly-journal-*)\n" +
+                "  • The journal-rollup\n" +
+                "  • Anything the agent appended via the learning loop\n\n" +
+                "Continue?"
+              )) return;
               await seedAgentMemoryIfEmpty(user.id, true);
               toast({ title: "Defaults restored" });
               load();
