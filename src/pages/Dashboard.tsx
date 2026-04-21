@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Pause, Play, Activity, Send, Sparkles, Sun, RefreshCw, Eye, MailOpen, Reply, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { TopTriggersWidget } from "@/components/TopTriggersWidget";
 
 type Run = {
   id: string;
@@ -173,6 +174,8 @@ const Dashboard = () => {
           )}
         </CardContent>
       </Card>
+
+      <TopTriggersWidget />
 
       <Card>
         <CardHeader><CardTitle className="text-base">7-day funnel</CardTitle></CardHeader>

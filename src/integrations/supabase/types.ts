@@ -379,6 +379,8 @@ export type Database = {
           acted_on: boolean
           created_at: string
           id: string
+          linked_lead_id: string | null
+          linked_pitch_id: string | null
           matched_offerings: string[] | null
           posted_at: string | null
           published_at: string | null
@@ -394,6 +396,8 @@ export type Database = {
           acted_on?: boolean
           created_at?: string
           id?: string
+          linked_lead_id?: string | null
+          linked_pitch_id?: string | null
           matched_offerings?: string[] | null
           posted_at?: string | null
           published_at?: string | null
@@ -409,6 +413,8 @@ export type Database = {
           acted_on?: boolean
           created_at?: string
           id?: string
+          linked_lead_id?: string | null
+          linked_pitch_id?: string | null
           matched_offerings?: string[] | null
           posted_at?: string | null
           published_at?: string | null
@@ -418,6 +424,33 @@ export type Database = {
           tags?: string[] | null
           title?: string
           url?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      intel_sources: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          name: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          name?: string
+          url?: string
           user_id?: string
         }
         Relationships: []
@@ -492,6 +525,7 @@ export type Database = {
       }
       offerings: {
         Row: {
+          auto_lead_from_intel: boolean
           created_at: string
           demo_url: string | null
           id: string
@@ -504,10 +538,12 @@ export type Database = {
           target_audience: string | null
           testimonial: string | null
           title: string
+          trigger_keywords: string[]
           updated_at: string
           user_id: string
         }
         Insert: {
+          auto_lead_from_intel?: boolean
           created_at?: string
           demo_url?: string | null
           id?: string
@@ -520,10 +556,12 @@ export type Database = {
           target_audience?: string | null
           testimonial?: string | null
           title: string
+          trigger_keywords?: string[]
           updated_at?: string
           user_id: string
         }
         Update: {
+          auto_lead_from_intel?: boolean
           created_at?: string
           demo_url?: string | null
           id?: string
@@ -536,6 +574,7 @@ export type Database = {
           target_audience?: string | null
           testimonial?: string | null
           title?: string
+          trigger_keywords?: string[]
           updated_at?: string
           user_id?: string
         }
@@ -742,6 +781,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      social_drafts: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          intel_item_id: string | null
+          platform: string
+          posted_at: string | null
+          provider_post_id: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          intel_item_id?: string | null
+          platform: string
+          posted_at?: string | null
+          provider_post_id?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          intel_item_id?: string | null
+          platform?: string
+          posted_at?: string | null
+          provider_post_id?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       templates: {
         Row: {

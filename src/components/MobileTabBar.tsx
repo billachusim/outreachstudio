@@ -1,11 +1,11 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, MessageSquare, Megaphone, Users, Inbox } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Share2, Users, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { title: "Studio", url: "/", icon: LayoutDashboard },
   { title: "Agent", url: "/chat", icon: MessageSquare },
-  { title: "Campaigns", url: "/campaigns", icon: Megaphone },
+  { title: "Social", url: "/social", icon: Share2 },
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Inbox", url: "/inbox", icon: Inbox },
 ];
