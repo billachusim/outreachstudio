@@ -90,8 +90,7 @@ export const FetchLeadsProgress = ({ variant = "button", onChange }: Props) => {
           const added = newPromoted - oldPromoted;
           toast({
             title: `${added} new intel source${added === 1 ? "" : "s"} auto-added`,
-            description: "Promoted from listicles that produced quality leads. Tap to review.",
-            // @ts-expect-error - allow custom action via onClick prop hack: provide link in description
+            description: "Promoted from listicles that produced quality leads. View in Intel → Sources.",
           });
         }
       })
