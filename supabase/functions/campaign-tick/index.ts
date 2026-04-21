@@ -478,6 +478,13 @@ Notes: ${lead.notes ?? ""}`;
         .from("pitches").select("id", { count: "exact", head: true })
         .eq("user_id", run.user_id).gte("sent_at", startOfDay.toISOString());
 
+      const GLOBAL_DAILY_CAP = 300;
+      if ((sentToday ?? 0) >= GLOBAL_DAILY_CAP) {
+        await logEvent("info", `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Pausing for today.`);
+        await updateRun({ state: "paused" as never, error: `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Resumes tomorrow.` });
+        return json(200, { ok: true, paused: true });
+      }
+
       if ((sentToday ?? 0) >= effectiveCap) {
         await logEvent("info", `Daily ${channelKey} cap reached (${sentToday}/${effectiveCap}). Pausing for today.`);
         await updateRun({ state: "paused" as never, error: "Daily cap reached" });

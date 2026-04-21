@@ -190,7 +190,7 @@ export async function runLaunch(
       discovery_source: c.discovery_source,
       channel: c.channel,
       status: "active",
-      email_cap: 20,
+      email_cap: 50,
     })
     .select("id")
     .single();
@@ -201,8 +201,8 @@ export async function runLaunch(
     .insert({
       user_id: userId,
       campaign_id: campaign.id,
-      target_lead_count: 20,
-      daily_send_cap: 20,
+      target_lead_count: 50,
+      daily_send_cap: 50,
       state: "queued",
     })
     .select("id")
