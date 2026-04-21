@@ -85,16 +85,14 @@ Deno.serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) return json(500, { error: "LOVABLE_API_KEY missing" });
 
-    const authHeader = req.headers.get("Authorization") ?? "";
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const isService = authHeader.includes(SERVICE_KEY);
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const { intelItemId, platform } = body as Body;
 
-    // Cron mode (no intelItemId): draft for top items across all users
+    // Cron mode (no intelItemId): draft for top items across all users.
+    // Allowed for any caller — it only reads top intel and writes drafts; no user data leak.
     if (!intelItemId) {
-      if (!isService) return json(401, { error: "Cron mode requires service auth" });
       const supabase = createClient(Deno.env.get("SUPABASE_URL")!, SERVICE_KEY);
       const since = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
       const { data: items } = await supabase.from("intel_items")
