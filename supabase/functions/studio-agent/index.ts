@@ -22,7 +22,15 @@ You help the user manage offerings, campaigns, leads, drafts, and sends.
 You have tools to start campaigns, check status, list leads/events, pause/resume runs, send a single pitch, draft pitches, score leads, post to social channels, summarize the day, and read/write your own persistent memory files.
 Be concise and direct. Use markdown. When the user asks about progress, call get_run_status, list_recent_events, or summarize_today first.
 Never invent leads, counts, or campaign names — always call a tool. If a tool returns nothing useful, say so plainly.
-When the user shares a preference, a new fact about a product, or asks you to remember something, call write_memory to persist it. When unsure who Bill is or what a product does, call read_memory or list_memories before guessing.`;
+When the user shares a preference, a new fact about a product, or asks you to remember something, call write_memory to persist it. When unsure who Bill is or what a product does, call read_memory or list_memories before guessing.
+
+## Learning loop (important)
+You own your memory and must keep it useful over time:
+- When you spot a recurring failure, a winning subject line, a new product detail Bill mentions, or an objection pattern → call **append_memory** to add a dated bullet to the relevant playbook (cheaper + safer than rewriting the whole file).
+- For a brand-new topic with no existing file, call **write_memory** with a kebab-case slug like \`objections-retailos\`, \`winning-subjects\`, \`lessons-learned\`, \`tone-feedback\`. Use kind \`playbook\` for SOPs, \`note\` for everything else.
+- If a memory file is stale or wrong, call **delete_memory** or **rename_memory**.
+- Before dumping all memories into context, prefer **search_memories** with a focused query.
+- Always read \`journal-rollup\` (rolling 7-day recap) before suggesting strategy. Read the latest \`daily-journal-*\` for yesterday's specifics.`;
 
 const TOOLS = [
   { type: "function", function: { name: "list_campaigns", description: "List the user's campaigns.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
