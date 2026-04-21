@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 
 type Platform = "x" | "linkedin" | "instagram";
+type IntelLite = { id: string; title: string; url: string | null; source: string };
 type Draft = {
   id: string;
   platform: Platform;
@@ -17,7 +18,7 @@ type Draft = {
   posted_at: string | null;
   created_at: string;
   intel_item_id: string | null;
-  intel_items?: { title: string; url: string | null; source: string } | null;
+  intel?: IntelLite | null;
 };
 type ChannelAccount = { channel: string };
 
@@ -41,12 +42,20 @@ const Social = () => {
     const [draftsRes, chRes] = await Promise.all([
       supabase
         .from("social_drafts")
-        .select("*, intel_items(title, url, source)")
+        .select("*")
         .order("created_at", { ascending: false })
         .limit(100),
       supabase.from("channel_accounts").select("channel").eq("status", "active"),
     ]);
-    setDrafts((draftsRes.data as Draft[]) ?? []);
+    const rawDrafts = (draftsRes.data as any[]) ?? [];
+    const intelIds = Array.from(new Set(rawDrafts.map((d) => d.intel_item_id).filter(Boolean))) as string[];
+    let intelMap: Record<string, IntelLite> = {};
+    if (intelIds.length > 0) {
+      const { data: intels } = await supabase
+        .from("intel_items").select("id, title, url, source").in("id", intelIds);
+      intelMap = Object.fromEntries(((intels as IntelLite[]) ?? []).map((i) => [i.id, i]));
+    }
+    setDrafts(rawDrafts.map((d) => ({ ...d, intel: d.intel_item_id ? intelMap[d.intel_item_id] ?? null : null })) as Draft[]);
     setChannels(new Set(((chRes.data as ChannelAccount[]) ?? []).map((c) => c.channel)));
     setLoading(false);
   };
@@ -139,18 +148,18 @@ const Social = () => {
               filtered.map((d) => (
                 <Card key={d.id}>
                   <CardContent className="p-4 space-y-3">
-                    {d.intel_items && (
+                    {d.intel && (
                       <div className="flex items-start gap-2 text-xs text-muted-foreground">
                         <Newspaper className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                         <div className="min-w-0">
                           <p className="line-clamp-1">
-                            {d.intel_items.url ? (
-                              <a href={d.intel_items.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                                {d.intel_items.title}
+                            {d.intel.url ? (
+                              <a href={d.intel.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                {d.intel.title}
                               </a>
-                            ) : d.intel_items.title}
+                            ) : d.intel.title}
                           </p>
-                          <p className="capitalize">{d.intel_items.source} · {formatDistanceToNow(new Date(d.created_at), { addSuffix: true })}</p>
+                          <p className="capitalize">{d.intel.source} · {formatDistanceToNow(new Date(d.created_at), { addSuffix: true })}</p>
                         </div>
                       </div>
                     )}
