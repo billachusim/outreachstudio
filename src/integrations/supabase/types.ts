@@ -466,8 +466,13 @@ export type Database = {
           contact_email: string | null
           contact_name: string | null
           created_at: string
+          enrichment_summary: string | null
+          facebook_url: string | null
           id: string
+          instagram_url: string | null
           last_activity_at: string | null
+          last_enriched_at: string | null
+          linkedin_url: string | null
           notes: string | null
           phone: string | null
           reply_intent: string | null
@@ -477,6 +482,7 @@ export type Database = {
           updated_at: string
           user_id: string
           website: string | null
+          x_url: string | null
         }
         Insert: {
           address?: string | null
@@ -485,8 +491,13 @@ export type Database = {
           contact_email?: string | null
           contact_name?: string | null
           created_at?: string
+          enrichment_summary?: string | null
+          facebook_url?: string | null
           id?: string
+          instagram_url?: string | null
           last_activity_at?: string | null
+          last_enriched_at?: string | null
+          linkedin_url?: string | null
           notes?: string | null
           phone?: string | null
           reply_intent?: string | null
@@ -496,6 +507,7 @@ export type Database = {
           updated_at?: string
           user_id: string
           website?: string | null
+          x_url?: string | null
         }
         Update: {
           address?: string | null
@@ -504,8 +516,13 @@ export type Database = {
           contact_email?: string | null
           contact_name?: string | null
           created_at?: string
+          enrichment_summary?: string | null
+          facebook_url?: string | null
           id?: string
+          instagram_url?: string | null
           last_activity_at?: string | null
+          last_enriched_at?: string | null
+          linkedin_url?: string | null
           notes?: string | null
           phone?: string | null
           reply_intent?: string | null
@@ -515,6 +532,7 @@ export type Database = {
           updated_at?: string
           user_id?: string
           website?: string | null
+          x_url?: string | null
         }
         Relationships: [
           {
@@ -722,6 +740,8 @@ export type Database = {
           created_at: string
           display_name: string | null
           id: string
+          outreach_country_code: string
+          outreach_region: string
           updated_at: string
           user_id: string
         }
@@ -729,6 +749,8 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           id?: string
+          outreach_country_code?: string
+          outreach_region?: string
           updated_at?: string
           user_id: string
         }
@@ -736,6 +758,8 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           id?: string
+          outreach_country_code?: string
+          outreach_region?: string
           updated_at?: string
           user_id?: string
         }
