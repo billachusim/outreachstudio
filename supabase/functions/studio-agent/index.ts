@@ -47,6 +47,8 @@ const TOOLS = [
   { type: "function", function: { name: "list_memories", description: "List all persistent memory files.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "read_memory", description: "Read a memory file by slug.", parameters: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"], additionalProperties: false } } },
   { type: "function", function: { name: "write_memory", description: "Create or update a persistent memory file.", parameters: { type: "object", properties: { slug: { type: "string" }, title: { type: "string" }, kind: { type: "string", enum: ["identity", "personality", "portfolio", "playbook", "note"] }, content: { type: "string" } }, required: ["slug", "title", "kind", "content"], additionalProperties: false } } },
+  { type: "function", function: { name: "list_recent_intel", description: "List recent intel items (news triggers) for the user, newest first. Use to find the right intel item before drafting a pitch.", parameters: { type: "object", properties: { limit: { type: "number", default: 10 }, min_score: { type: "number" }, only_unactioned: { type: "boolean", default: true } }, additionalProperties: false } } },
+  { type: "function", function: { name: "draft_pitch_from_intel", description: "Draft a PR/outreach pitch grounded in a specific intel item (news headline). Pass either intel_item_id, OR a headline_query to fuzzy-match the latest intel by title. Optionally pin to an offering and lead. If save=true, persists the pitch on the lead as a draft.", parameters: { type: "object", properties: { intel_item_id: { type: "string" }, headline_query: { type: "string" }, offering_id: { type: "string" }, lead_id: { type: "string" }, save: { type: "boolean", default: false } }, additionalProperties: false } } },
 ];
 
 async function executeTool(name: string, args: any, ctx: { supabase: any; userId: string; tickUrl: string; serviceKey: string; supaUrl: string; authHeader: string }) {
@@ -195,6 +197,33 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
       }
       const { error } = await supabase.from("agent_memories").insert({ user_id: userId, slug, title, kind, content });
       return error ? { error: error.message } : { ok: true, created: slug };
+    }
+    case "list_recent_intel": {
+      let q = supabase.from("intel_items")
+        .select("id, source, title, url, relevance_score, matched_offerings, linked_lead_id, acted_on, created_at")
+        .eq("user_id", userId);
+      if (args?.only_unactioned !== false) q = q.eq("acted_on", false);
+      if (typeof args?.min_score === "number") q = q.gte("relevance_score", args.min_score);
+      const { data } = await q.order("relevance_score", { ascending: false }).order("created_at", { ascending: false }).limit(args?.limit ?? 10);
+      return data ?? [];
+    }
+    case "draft_pitch_from_intel": {
+      let intelItemId: string | null = args.intel_item_id ?? null;
+      if (!intelItemId && args.headline_query) {
+        const { data: matches } = await supabase
+          .from("intel_items").select("id, title").eq("user_id", userId)
+          .ilike("title", `%${String(args.headline_query).slice(0, 80)}%`)
+          .order("created_at", { ascending: false }).limit(1);
+        intelItemId = matches?.[0]?.id ?? null;
+      }
+      if (!intelItemId) return { error: "Provide intel_item_id or a headline_query that matches a recent intel item. Use list_recent_intel to browse." };
+      const r = await invoke("draft-pitch-from-intel", {
+        intelItemId,
+        offeringId: args.offering_id ?? null,
+        leadId: args.lead_id ?? null,
+        save: !!args.save,
+      });
+      return r;
     }
     default: return { error: `Unknown tool ${name}` };
   }
