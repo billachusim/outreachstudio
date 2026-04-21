@@ -13,12 +13,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, Sparkles, MessageCircle, LayoutGrid, List, Search, Mail, Phone, Globe } from "lucide-react";
+import { Plus, Trash2, Sparkles, MessageCircle, LayoutGrid, List, Search, Mail, Phone, Globe, Upload, Inbox, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PitchDrawer } from "@/components/PitchDrawer";
 import { BulkDraftBar } from "@/components/BulkDraftBar";
 import { LeadDetailDrawer, type LeadDetail } from "@/components/LeadDetailDrawer";
 import { LeadCard } from "@/components/LeadCard";
+import { ImportLeadsDialog } from "@/components/ImportLeadsDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+const RAW_VALUE = "__raw__";
+const NO_CAMPAIGN = "__none__";
 
 type LeadStatus = "new" | "enriched" | "drafted" | "sent" | "opened" | "replied" | "won" | "lost";
 const STATUSES: LeadStatus[] = ["new", "enriched", "drafted", "sent", "opened", "replied", "won", "lost"];
@@ -36,10 +41,11 @@ const statusVariant: Record<LeadStatus, string> = {
   lost: "bg-destructive/10 text-destructive",
 };
 
-type TabKey = "all" | "hot" | "ready" | "needs" | "replied" | "won";
+type TabKey = "all" | "raw" | "hot" | "ready" | "needs" | "replied" | "won";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "all", label: "All" },
+  { key: "raw", label: "📥 Raw" },
   { key: "hot", label: "🔥 Hot" },
   { key: "ready", label: "✉ Ready" },
   { key: "needs", label: "⏳ Needs enrichment" },
@@ -57,12 +63,14 @@ const Leads = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [region, setRegion] = useState("Nigeria");
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Partial<LeadDetail>>({ business_name: "", status: "new" });
+  const [importOpen, setImportOpen] = useState(false);
+  const [draft, setDraft] = useState<Partial<LeadDetail>>({ business_name: "", status: "new", campaign_id: null });
   const [pitchLead, setPitchLead] = useState<LeadDetail | null>(null);
   const [pitchOpen, setPitchOpen] = useState(false);
   const [detailLead, setDetailLead] = useState<LeadDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [assignTarget, setAssignTarget] = useState<string>("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [minScore, setMinScore] = useState<number>(0);
@@ -80,11 +88,12 @@ const Leads = () => {
 
   const load = async () => {
     if (!user) return;
+    let leadsQuery = supabase.from("leads").select("*");
+    if (campaignFilter === RAW_VALUE) leadsQuery = leadsQuery.is("campaign_id", null);
+    else if (campaignFilter) leadsQuery = leadsQuery.eq("campaign_id", campaignFilter);
     const [{ data: cs }, leadsRes, { data: prof }] = await Promise.all([
       supabase.from("campaigns").select("id,name").order("name"),
-      campaignFilter
-        ? supabase.from("leads").select("*").eq("campaign_id", campaignFilter).order("score", { ascending: false }).order("created_at", { ascending: false })
-        : supabase.from("leads").select("*").order("score", { ascending: false }).order("created_at", { ascending: false }),
+      leadsQuery.order("score", { ascending: false }).order("created_at", { ascending: false }),
       supabase.from("profiles").select("outreach_region").eq("user_id", user.id).maybeSingle(),
     ]);
     setCampaigns((cs as Campaign[]) ?? []);
@@ -99,7 +108,8 @@ const Leads = () => {
     const hot = leads.filter((l) => (l.score ?? 0) >= 70).length;
     const ready = leads.filter((l) => l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status)).length;
     const needs = leads.filter((l) => !l.contact_email && !l.phone).length;
-    return { total, hot, ready, needs };
+    const raw = leads.filter((l) => !l.campaign_id).length;
+    return { total, hot, ready, needs, raw };
   }, [leads]);
 
   const filtered = useMemo(() => {
@@ -109,6 +119,7 @@ const Leads = () => {
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
       if ((l.score ?? 0) < minScore) return false;
       switch (tab) {
+        case "raw": return !l.campaign_id;
         case "hot": return (l.score ?? 0) >= 70;
         case "ready": return !!l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status);
         case "needs": return !l.contact_email && !l.phone;
@@ -124,6 +135,10 @@ const Leads = () => {
 
   const handleCreate = async () => {
     if (!user || !draft.business_name?.trim()) return;
+    // campaign_id: explicitly null if user picked "no campaign", else the chosen one, else inherit URL filter (unless filter is RAW)
+    let cid: string | null = null;
+    if (draft.campaign_id !== undefined) cid = draft.campaign_id;
+    else if (campaignFilter && campaignFilter !== RAW_VALUE) cid = campaignFilter;
     const { error } = await supabase.from("leads").insert({
       user_id: user.id,
       business_name: draft.business_name,
@@ -134,11 +149,22 @@ const Leads = () => {
       address: draft.address ?? null,
       notes: draft.notes ?? null,
       status: (draft.status ?? "new") as LeadStatus,
-      campaign_id: draft.campaign_id ?? campaignFilter ?? null,
+      campaign_id: cid,
     } as never);
     if (error) return toast({ title: "Create failed", description: error.message, variant: "destructive" });
     setOpen(false);
-    setDraft({ business_name: "", status: "new" });
+    setDraft({ business_name: "", status: "new", campaign_id: null });
+    load();
+  };
+
+  const bulkAssign = async (newCampaignId: string | null) => {
+    if (selected.size === 0) return;
+    const ids = Array.from(selected);
+    const { error } = await supabase.from("leads").update({ campaign_id: newCampaignId }).in("id", ids);
+    if (error) return toast({ title: "Assign failed", description: error.message, variant: "destructive" });
+    toast({ title: newCampaignId ? "Assigned to campaign" : "Detached to raw pool", description: `${ids.length} lead${ids.length === 1 ? "" : "s"} updated.` });
+    setSelected(new Set());
+    setAssignTarget("");
     load();
   };
 
@@ -175,11 +201,14 @@ const Leads = () => {
         <div>
           <h1 className="text-xl font-semibold sm:text-2xl">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready to send</span> · {counters.needs} need enrichment
+            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready</span> · {counters.needs} need enrichment · <span className="text-foreground">{counters.raw} raw</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="gap-1"><Globe className="h-3 w-3" />Region: {region}</Badge>
+          <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload className="h-4 w-4" /> Import CSV
+          </Button>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4" /> Add lead</Button></DialogTrigger>
             <DialogContent className="max-h-[85vh] overflow-y-auto">
@@ -187,9 +216,15 @@ const Leads = () => {
               <div className="grid gap-4">
                 <div className="space-y-1.5"><Label>Business name</Label><Input value={draft.business_name ?? ""} onChange={(e) => setDraft({ ...draft, business_name: e.target.value })} /></div>
                 <div className="space-y-1.5"><Label>Campaign</Label>
-                  <Select value={draft.campaign_id ?? campaignFilter ?? undefined} onValueChange={(v) => setDraft({ ...draft, campaign_id: v })}>
+                  <Select
+                    value={draft.campaign_id === null ? NO_CAMPAIGN : (draft.campaign_id ?? (campaignFilter && campaignFilter !== RAW_VALUE ? campaignFilter : NO_CAMPAIGN))}
+                    onValueChange={(v) => setDraft({ ...draft, campaign_id: v === NO_CAMPAIGN ? null : v })}
+                  >
                     <SelectTrigger><SelectValue placeholder="Select campaign" /></SelectTrigger>
-                    <SelectContent>{campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      <SelectItem value={NO_CAMPAIGN}>— Raw lead (no campaign) —</SelectItem>
+                      {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -217,9 +252,10 @@ const Leads = () => {
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, domain…" className="pl-9" />
         </div>
         <Select value={campaignFilter ?? "all"} onValueChange={(v) => v === "all" ? setParams({}) : setParams({ campaign: v })}>
-          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Campaign" /></SelectTrigger>
+          <SelectTrigger className="w-[200px]"><SelectValue placeholder="Campaign" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All campaigns</SelectItem>
+            <SelectItem value={RAW_VALUE}>📥 Raw leads (unassigned)</SelectItem>
             {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
@@ -252,6 +288,32 @@ const Leads = () => {
           {TABS.map((t) => <TabsTrigger key={t.key} value={t.key} className="text-xs sm:text-sm">{t.label}</TabsTrigger>)}
         </TabsList>
       </Tabs>
+
+      {/* Bulk action bar — assign to campaign */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          <span className="font-medium">{selected.size} selected</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="outline"><Inbox className="h-4 w-4" /> Assign to campaign…</Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 space-y-2">
+              <Label className="text-xs">Move {selected.size} lead{selected.size === 1 ? "" : "s"} to:</Label>
+              <Select value={assignTarget} onValueChange={setAssignTarget}>
+                <SelectTrigger><SelectValue placeholder="Pick campaign" /></SelectTrigger>
+                <SelectContent>
+                  {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="flex gap-2">
+                <Button size="sm" className="flex-1" onClick={() => assignTarget && bulkAssign(assignTarget)} disabled={!assignTarget}>Assign</Button>
+                <Button size="sm" variant="outline" onClick={() => bulkAssign(null)} title="Detach">Detach</Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="ml-auto"><X className="h-4 w-4" /> Clear</Button>
+        </div>
+      )}
 
       <BulkDraftBar selectedIds={Array.from(selected)} onClear={() => setSelected(new Set())} onComplete={() => { setSelected(new Set()); load(); }} />
 
@@ -339,10 +401,12 @@ const Leads = () => {
         lead={detailLead}
         open={detailOpen}
         onOpenChange={setDetailOpen}
+        campaigns={campaigns}
         onDraftPitch={(l) => { setDetailOpen(false); openDraft(l); }}
         onWhatsApp={(l) => { setDetailOpen(false); sendWhatsApp(l); }}
         onChanged={load}
       />
+      <ImportLeadsDialog open={importOpen} onOpenChange={setImportOpen} campaigns={campaigns} onImported={load} />
     </div>
   );
 };

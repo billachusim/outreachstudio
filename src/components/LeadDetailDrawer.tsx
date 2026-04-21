@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   Mail,
@@ -47,20 +48,34 @@ export type LeadDetail = {
 };
 
 type Pitch = { id: string; subject: string | null; sent_at: string | null; created_at: string };
+type Campaign = { id: string; name: string };
 
 interface Props {
   lead: LeadDetail | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  campaigns?: Campaign[];
   onDraftPitch: (lead: LeadDetail) => void;
   onWhatsApp: (lead: LeadDetail) => void;
   onChanged?: () => void;
 }
 
-export const LeadDetailDrawer = ({ lead, open, onOpenChange, onDraftPitch, onWhatsApp, onChanged }: Props) => {
+export const LeadDetailDrawer = ({ lead, open, onOpenChange, campaigns = [], onDraftPitch, onWhatsApp, onChanged }: Props) => {
   const { toast } = useToast();
   const [pitches, setPitches] = useState<Pitch[]>([]);
   const [enriching, setEnriching] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState(false);
+
+  const currentCampaign = campaigns.find((c) => c.id === lead?.campaign_id);
+
+  const reassign = async (newCampaignId: string | null) => {
+    if (!lead) return;
+    const { error } = await supabase.from("leads").update({ campaign_id: newCampaignId }).eq("id", lead.id);
+    if (error) return toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    toast({ title: newCampaignId ? "Reassigned" : "Detached to raw pool" });
+    setEditingCampaign(false);
+    onChanged?.();
+  };
 
   useEffect(() => {
     if (!open || !lead) return;
@@ -153,6 +168,31 @@ export const LeadDetailDrawer = ({ lead, open, onOpenChange, onDraftPitch, onWha
 
           <Separator />
 
+          {/* Campaign assignment */}
+          <div className="space-y-1.5 text-sm">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Campaign</h3>
+            {editingCampaign ? (
+              <div className="flex items-center gap-2">
+                <Select value={lead.campaign_id ?? "__none__"} onValueChange={(v) => reassign(v === "__none__" ? null : v)}>
+                  <SelectTrigger className="h-9 flex-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Raw (no campaign) —</SelectItem>
+                    {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button size="sm" variant="ghost" onClick={() => setEditingCampaign(false)}>Cancel</Button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <span className={lead.campaign_id ? "font-medium" : "text-muted-foreground"}>
+                  {currentCampaign?.name ?? (lead.campaign_id ? "(unknown)" : "📥 Raw — unassigned")}
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => setEditingCampaign(true)}>Change</Button>
+              </div>
+            )}
+          </div>
+
+          <Separator />
           {/* Contact block */}
           <div className="space-y-2 text-sm">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Contact</h3>

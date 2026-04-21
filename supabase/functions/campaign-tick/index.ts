@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
       return json(200, { ok: true, runId: run.id, transition: "queued->discovering" });
     }
 
-    // STATE: discovering — find leads via Firecrawl
+    // STATE: discovering — find leads via raw pool first, then external sources
     if (run.state === "discovering") {
       // Count existing leads in campaign
       const { count: existingCount } = await supabase
@@ -179,12 +179,79 @@ Deno.serve(async (req) => {
         return json(200, { ok: true, transition: "discovering->enriching" });
       }
 
+      // === Raw-pool sweep: reuse user's unassigned leads matching this campaign ===
+      const need = run.target_lead_count - have;
+      const userRegion = await fetchUserRegion(supabase, run.user_id);
+      const cc = userRegion.countryCode.toLowerCase();
+      const kwTerms: string[] = [];
+      if (campaign.keywords) kwTerms.push(...campaign.keywords.toLowerCase().split(/[,\s]+/).filter((t) => t.length > 2));
+      if (campaign.category) kwTerms.push(...campaign.category.toLowerCase().split(/[,\s]+/).filter((t) => t.length > 2));
+      const cityLc = (campaign.city ?? "").toLowerCase();
+
+      const { data: rawPool } = await supabase
+        .from("leads")
+        .select("id, business_name, notes, enrichment_summary, address, website")
+        .eq("user_id", run.user_id)
+        .is("campaign_id", null)
+        .order("score", { ascending: false })
+        .limit(Math.max(need * 4, 25));
+
+      const matchedIds: string[] = [];
+      for (const l of (rawPool ?? [])) {
+        if (matchedIds.length >= need) break;
+        const blob = `${l.business_name ?? ""} ${l.notes ?? ""} ${l.enrichment_summary ?? ""}`.toLowerCase();
+        const addr = (l.address ?? "").toLowerCase();
+        const host = l.website ? rootDomain(l.website) ?? "" : "";
+
+        let kwHits = 0;
+        for (const t of kwTerms) if (t && blob.includes(t)) kwHits++;
+        const cityHit = cityLc && (addr.includes(cityLc) || blob.includes(cityLc));
+        const regionHit = host.endsWith(`.${cc}`) || addr.includes(userRegion.region.toLowerCase());
+
+        // Threshold: ≥1 keyword hit, OR (city hit + region signal), OR (no keywords at all + region hit)
+        const noKw = kwTerms.length === 0;
+        if (kwHits >= 1 || (cityHit && (regionHit || kwHits >= 1)) || (noKw && regionHit)) {
+          matchedIds.push(l.id);
+        }
+      }
+
+      if (matchedIds.length > 0) {
+        const { error: attachErr } = await supabase
+          .from("leads")
+          .update({ campaign_id: campaign.id })
+          .in("id", matchedIds);
+        if (!attachErr) {
+          await logEvent(
+            "reused_from_pool",
+            `Reused ${matchedIds.length} raw lead${matchedIds.length === 1 ? "" : "s"} matching campaign keywords (saving discovery credits).`,
+          );
+          const newHave = have + matchedIds.length;
+          if (newHave >= run.target_lead_count) {
+            await updateRun({ state: "enriching" as never, leads_found: newHave });
+            return json(200, { ok: true, runId: run.id, reused: matchedIds.length, total: newHave, transition: "discovering->enriching" });
+          }
+          // Fall through to external discovery for the remainder
+        }
+      }
+
+      // Re-count after sweep
+      const { count: postSweep } = await supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign.id);
+      const haveAfter = postSweep ?? have;
+      if (haveAfter >= run.target_lead_count) {
+        await updateRun({ state: "enriching" as never, leads_found: haveAfter });
+        return json(200, { ok: true, transition: "discovering->enriching", reused: matchedIds.length });
+      }
+      // Use post-sweep count for remainder targeting
+      const haveForExternal = haveAfter;
       const source = (campaign as any).discovery_source ?? "firecrawl";
 
       // === Google Places branch ===
       if (source === "google_places") {
         if (!GOOGLE_PLACES_API_KEY) return await fail("Google Places API key not configured.");
-        const wanted = Math.min(20, run.target_lead_count - have);
+        const wanted = Math.min(20, run.target_lead_count - haveForExternal);
         const textParts: string[] = [];
         if (campaign.category) textParts.push(campaign.category);
         if (campaign.keywords) textParts.push(campaign.keywords);
@@ -237,7 +304,7 @@ Deno.serve(async (req) => {
           });
           if (!insErr) insertedP++;
         }
-        const newTotalP = have + insertedP;
+        const newTotalP = haveForExternal + insertedP;
         await logEvent("discovered", `Google Places: found ${insertedP} new lead${insertedP === 1 ? "" : "s"} (${newTotalP}/${run.target_lead_count}).`);
         const nextStateP = newTotalP >= run.target_lead_count || insertedP === 0 ? "enriching" : "discovering";
         await updateRun({ state: nextStateP as never, leads_found: newTotalP });
@@ -249,25 +316,24 @@ Deno.serve(async (req) => {
         return await fail("Firecrawl not connected — cannot discover leads.");
       }
 
-      // Region-anchored query
-      const region = await fetchUserRegion(supabase, run.user_id);
+      // Region-anchored query (reuse userRegion from raw-pool sweep)
       const parts: string[] = [];
       if (campaign.category) parts.push(campaign.category);
       if (campaign.keywords) parts.push(campaign.keywords);
       if (campaign.city) parts.push(`in ${campaign.city}`);
-      else parts.push(`in ${region.region}`);
+      else parts.push(`in ${userRegion.region}`);
       if (parts.length === 0) parts.push(campaign.name);
       const baseQuery = parts.join(" ");
-      const query = buildRegionalQuery(baseQuery, region);
+      const query = buildRegionalQuery(baseQuery, userRegion);
 
-      const wanted = Math.min(10, run.target_lead_count - have);
+      const wanted = Math.min(10, run.target_lead_count - haveForExternal);
       const sres = await fetch(`${FIRECRAWL_V2}/search`, {
         method: "POST",
         headers: { Authorization: `Bearer ${FIRECRAWL_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           query,
           limit: Math.max(wanted * 2, 10),
-          location: firecrawlLocationParam(region),
+          location: firecrawlLocationParam(userRegion),
         }),
       });
       const sjson = await sres.json();
@@ -303,7 +369,7 @@ Deno.serve(async (req) => {
         if (!insErr) inserted++;
       }
 
-      const newTotal = have + inserted;
+      const newTotal = haveForExternal + inserted;
       await logEvent("discovered", `Found ${inserted} new lead${inserted === 1 ? "" : "s"} (${newTotal}/${run.target_lead_count}).`);
       const nextState = newTotal >= run.target_lead_count || inserted === 0 ? "enriching" : "discovering";
       await updateRun({ state: nextState as never, leads_found: newTotal });
