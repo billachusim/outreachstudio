@@ -31,6 +31,12 @@ const ENRICH_TOP_N = 25;
 const SEARCH_CREDIT_PER_CALL = 1;
 const SCRAPE_CREDIT_PER_CALL = 1;
 
+// Aggregator explosion budget (mining listicles for individual businesses).
+const MAX_AGGREGATORS_PER_RUN = 8;
+const MAX_BUSINESSES_PER_AGGREGATOR = 15;
+const AGGREGATOR_SCRAPE_CONCURRENCY = 3;
+const AGGREGATOR_CEILING_GUARD = 20; // skip explosion when within N of hard ceiling
+
 // Hosts we never insert as leads AND never try to mine (social, search, marketplaces).
 const HOST_BLOCKLIST = [
   "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
