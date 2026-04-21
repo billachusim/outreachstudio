@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Newspaper, Sparkles, ExternalLink } from "lucide-react";
+import { Newspaper, Sparkles, ExternalLink, Megaphone } from "lucide-react";
 import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
+import { IntelSocialDrawer } from "@/components/IntelSocialDrawer";
 
 type Item = {
   id: string;
@@ -21,6 +22,7 @@ export const TopTriggersWidget = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [socialId, setSocialId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -38,6 +40,7 @@ export const TopTriggersWidget = () => {
   useEffect(() => { load(); }, []);
 
   const active = items.find((i) => i.id === openId) ?? null;
+  const activeSocial = items.find((i) => i.id === socialId) ?? null;
 
   return (
     <>
@@ -70,6 +73,9 @@ export const TopTriggersWidget = () => {
                     <Button size="sm" variant="default" onClick={() => setOpenId(it.id)}>
                       <Sparkles className="h-3 w-3 mr-1" /> Pitch
                     </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setSocialId(it.id)}>
+                      <Megaphone className="h-3 w-3 mr-1" /> Post
+                    </Button>
                     {it.url && (
                       <Button asChild size="sm" variant="ghost">
                         <a href={it.url} target="_blank" rel="noopener noreferrer">
@@ -92,6 +98,13 @@ export const TopTriggersWidget = () => {
         intelTitle={active?.title}
         matchedOfferingIds={active?.matched_offerings ?? []}
         linkedLeadId={active?.linked_lead_id ?? null}
+      />
+
+      <IntelSocialDrawer
+        open={!!socialId}
+        onOpenChange={(v) => { if (!v) setSocialId(null); }}
+        intelItemId={activeSocial?.id ?? null}
+        intelTitle={activeSocial?.title}
       />
     </>
   );
