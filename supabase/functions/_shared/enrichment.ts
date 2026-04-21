@@ -202,6 +202,35 @@ export function buildRegionalQuery(baseQuery: string, region: RegionContext): st
   return `${baseQuery} ("${region.region}" OR site:.${region.countryCode})`;
 }
 
+// For African regions, expand bias to neighbouring African countries (still local-first).
+const AFRICAN_NEIGHBOURS: Record<string, string[]> = {
+  ng: ["Nigeria", "Ghana", "Kenya"],
+  ke: ["Kenya", "Uganda", "Tanzania", "Nigeria"],
+  gh: ["Ghana", "Nigeria", "Ivory Coast"],
+  za: ["South Africa", "Namibia", "Botswana", "Kenya"],
+  eg: ["Egypt", "Morocco", "UAE", "Saudi Arabia"],
+};
+const AFRICAN_TLDS: Record<string, string[]> = {
+  ng: ["ng", "gh", "ke"],
+  ke: ["ke", "ug", "tz", "ng"],
+  gh: ["gh", "ng", "ci"],
+  za: ["za", "na", "bw", "ke"],
+  eg: ["eg", "ma", "ae", "sa"],
+};
+
+export function buildAfricanRegionalQuery(baseQuery: string, region: RegionContext): string {
+  const cc = region.countryCode.toLowerCase();
+  const countries = AFRICAN_NEIGHBOURS[cc];
+  const tlds = AFRICAN_TLDS[cc];
+  if (!countries || !tlds) {
+    // Non-African region — fall back to the standard single-country bias.
+    return buildRegionalQuery(baseQuery, region);
+  }
+  const countryClause = countries.map((c) => `"${c}"`).join(" OR ");
+  const tldClause = tlds.map((t) => `site:.${t}`).join(" OR ");
+  return `${baseQuery} (${countryClause} OR ${tldClause})`;
+}
+
 export function firecrawlLocationParam(region: RegionContext) {
   return { country: region.countryCode.toUpperCase(), languages: ["en"] };
 }
