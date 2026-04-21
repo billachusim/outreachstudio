@@ -473,18 +473,18 @@ async function runFetch(
     log(`Initial pass — ${totalInserted} inserted from ${totalSeen} candidates`);
 
     // 4b. Persistence: if we ended up with too few leads, run broader fallback queries.
-    if (totalInserted < MIN_TARGET && !(await checkStopped()) && totalInserted < HARD_CEILING) {
+    if (totalInserted < MIN_TARGET && !(await checkStopped()) && totalInserted < hardCeiling) {
       log(`Below target (${totalInserted}/${MIN_TARGET}) — running ${FALLBACK_QUERY_BUDGET} fallback queries`);
       const fallback = buildFallbackQueries(region, (offRes.data ?? []) as any).slice(0, FALLBACK_QUERY_BUDGET);
       await update({ queries_planned: planned.length + fallback.length });
 
       for (let i = 0; i < fallback.length; i += MAX_CONCURRENT) {
         if (await checkStopped()) break;
-        if (totalInserted >= HARD_CEILING) break;
+        if (totalInserted >= hardCeiling) break;
         const batch = fallback.slice(i, i + MAX_CONCURRENT);
         const { outOfCredits } = await processBatch(batch);
         if (outOfCredits) {
-          await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue" });
+          await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue", failure_reason: "Firecrawl credits exhausted" });
           return;
         }
       }
@@ -501,7 +501,6 @@ async function runFetch(
 
       let enriched = 0;
       let highQuality = 0;
-      // Run enrichments with light concurrency to avoid timeouts
       for (let i = 0; i < top.length; i += 3) {
         if (await checkStopped()) break;
         const slice = top.slice(i, i + 3);
@@ -510,7 +509,7 @@ async function runFetch(
             const { data: lead } = await supabase.from("leads").select("*").eq("id", id).maybeSingle();
             if (!lead || !lead.website) return;
             const scrape = await firecrawlScrape(firecrawlKey, lead.website, scrapeLocation);
-            creditsEstimate += 1;
+            creditsEstimate += SCRAPE_CREDIT_PER_CALL;
             if (!scrape) return;
             const updates = await buildEnrichmentUpdates(lovableKey, lead as any, scrape);
             const newStatus = updates.contact_email || updates.phone ? "enriched" : lead.status;
@@ -537,12 +536,23 @@ async function runFetch(
       return;
     }
 
-    await update({ state: "done" });
+    // Compose failure_reason if zero leads inserted
+    let failureReason: string | null = null;
+    if (totalInserted === 0) {
+      const parts: string[] = [];
+      if (totalSeen === 0) parts.push("No search results returned by Firecrawl across all queries and fallback variants.");
+      else parts.push(`${totalSeen} candidates returned but all were filtered (blocklisted hosts, excluded TLDs, or duplicates of existing leads).`);
+      if (lastSearchError) parts.push(`Last search error: ${lastSearchError}.`);
+      parts.push(`Try widening offerings/keywords, raising max retries (current: ${maxRetries}), or checking Firecrawl quota.`);
+      failureReason = parts.join(" ");
+    }
+
+    await update({ state: "done", failure_reason: failureReason });
     log(`✓ Done — ${totalInserted} leads inserted, ~${creditsEstimate} credits used`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`fetch-leads ${runId} failed`, e);
-    await supabase.from("lead_fetch_runs").update({ state: "failed", error: msg.slice(0, 500) }).eq("id", runId);
+    await supabase.from("lead_fetch_runs").update({ state: "failed", error: msg.slice(0, 500), failure_reason: msg.slice(0, 500) }).eq("id", runId);
     supabase.from("run_events").insert({
       user_id: userId,
       kind: "fetch_leads",
