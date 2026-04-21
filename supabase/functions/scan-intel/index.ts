@@ -57,7 +57,12 @@ function normalizeArticles(scrape: any, source: string, baseUrl: string): Articl
       title: String(it.title).trim().slice(0, 300),
       url: abs,
       summary: it.summary ? String(it.summary).slice(0, 600) : undefined,
-      published_at: it.published_at ?? undefined,
+      published_at: (() => {
+        const v = it.published_at;
+        if (!v || typeof v !== "string" || v.trim() === "") return undefined;
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? undefined : d.toISOString();
+      })(),
       source,
     });
   }
@@ -67,15 +72,17 @@ function normalizeArticles(scrape: any, source: string, baseUrl: string): Articl
 async function runScanJob(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY: string) {
   try {
     const scraped: Article[] = [];
-    for (const s of SOURCES) {
-      try {
+    const results = await Promise.allSettled(
+      SOURCES.map(async (s) => {
         const data = await firecrawlScrape(s.url, FIRECRAWL_API_KEY);
         const arts = normalizeArticles(data, s.name, s.url).slice(0, s.limit);
-        scraped.push(...arts);
         console.log(`scan-intel: ${s.name} → ${arts.length} articles`);
-      } catch (e) {
-        console.error(`scan-intel: ${s.name} failed`, e);
-      }
+        return arts;
+      }),
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") scraped.push(...r.value);
+      else console.error("scan-intel: source failed", r.reason);
     }
     if (scraped.length === 0) { console.log("scan-intel: nothing scraped"); return; }
 
