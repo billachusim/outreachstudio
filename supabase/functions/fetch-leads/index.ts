@@ -23,10 +23,13 @@ const corsHeaders = {
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const LOVABLE_AI = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
-const HARD_CEILING = 200;
+const DEFAULT_HARD_CEILING = 200;
+const DEFAULT_MAX_RETRIES = 4; // fallback variants per query
 const QUERY_RESULTS = 20;
 const MAX_CONCURRENT = 4;
 const ENRICH_TOP_N = 25;
+const SEARCH_CREDIT_PER_CALL = 1;
+const SCRAPE_CREDIT_PER_CALL = 1;
 
 const HOST_BLOCKLIST = [
   "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
@@ -217,30 +220,33 @@ async function firecrawlSearch(
 }
 
 // Robust search: tries regional → without location → bare query.
-// Returns the first non-empty result set (or last attempt's result).
+// `maxAttempts` caps retries (1 = primary only, 4 = full fallback chain).
 async function robustSearch(
   apiKey: string,
   baseQuery: string,
   region: RegionContext,
   location: string,
-): Promise<{ results: FirecrawlHit[]; outOfCredits: boolean; attempts: number }> {
+  maxAttempts: number,
+): Promise<{ results: FirecrawlHit[]; outOfCredits: boolean; attempts: number; lastError?: string }> {
   const regional = buildAfricanRegionalQuery(baseQuery, region);
   const variants: Array<{ q: string; loc: string | null }> = [
-    { q: regional, loc: location },        // 1. AI-enhanced + region location
-    { q: regional, loc: null },            // 2. AI-enhanced, no location
-    { q: baseQuery, loc: location },       // 3. Bare query + region
-    { q: baseQuery, loc: null },           // 4. Bare query, no location
-  ];
+    { q: regional, loc: location },
+    { q: regional, loc: null },
+    { q: baseQuery, loc: location },
+    { q: baseQuery, loc: null },
+  ].slice(0, Math.max(1, Math.min(maxAttempts, 4)));
   let attempts = 0;
   let lastResults: FirecrawlHit[] = [];
+  let lastError: string | undefined;
   for (const v of variants) {
     attempts += 1;
     const r = await firecrawlSearch(apiKey, v.q, v.loc);
-    if (r.outOfCredits) return { results: [], outOfCredits: true, attempts };
+    if (r.outOfCredits) return { results: [], outOfCredits: true, attempts, lastError: "Firecrawl 402" };
+    if (r.status >= 400) lastError = `Firecrawl ${r.status}`;
     if (r.results.length > 0) return { results: r.results, outOfCredits: false, attempts };
     lastResults = r.results;
   }
-  return { results: lastResults, outOfCredits: false, attempts };
+  return { results: lastResults, outOfCredits: false, attempts, lastError };
 }
 
 async function firecrawlScrape(apiKey: string, url: string, location: ReturnType<typeof firecrawlScrapeLocation>) {
