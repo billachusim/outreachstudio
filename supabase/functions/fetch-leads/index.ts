@@ -700,6 +700,16 @@ async function runFetch(
                 candidatesForEnrichment.push({ id: row.id, signal: childRows[idx].__signal });
               });
               const hq = (inserted ?? []).filter((r: any) => (r.score ?? 0) >= 50).length;
+
+              // Track per-host stats for auto-promotion.
+              const stat = hostStats.get(aggHost) ?? { extracted: 0, insertedLeadIds: [], sourceUrl: agg.hit.url };
+              stat.extracted += childRows.length;
+              for (const row of inserted ?? []) {
+                if (row?.id) stat.insertedLeadIds.push(row.id as string);
+              }
+              stat.sourceUrl = agg.hit.url;
+              hostStats.set(aggHost, stat);
+
               const { data: cur } = await supabase.from("lead_fetch_runs").select("high_quality_count").eq("id", runId).maybeSingle();
               await update({
                 inserted_count: totalInserted,
