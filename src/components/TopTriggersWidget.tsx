@@ -29,21 +29,72 @@ export const TopTriggersWidget = () => {
   const [openId, setOpenId] = useState<string | null>(null);
   const [socialId, setSocialId] = useState<string | null>(null);
   const [launchId, setLaunchId] = useState<string | null>(null);
+  const [runProgress, setRunProgress] = useState<Record<string, RunProgress>>({});
 
   const load = async () => {
     setLoading(true);
     const { data } = await supabase
       .from("intel_items")
-      .select("id, source, title, url, relevance_score, matched_offerings, linked_lead_id, linked_pitch_id")
+      .select("id, source, title, url, relevance_score, matched_offerings, linked_lead_id, linked_pitch_id, spawned_campaign_id")
       .eq("acted_on", false)
       .order("relevance_score", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(3);
-    setItems((data as Item[]) ?? []);
+
+    // Also include items already auto-launched in the last 24h so the user sees the result.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: launched } = await supabase
+      .from("intel_items")
+      .select("id, source, title, url, relevance_score, matched_offerings, linked_lead_id, linked_pitch_id, spawned_campaign_id")
+      .not("spawned_campaign_id", "is", null)
+      .gte("created_at", since)
+      .order("relevance_score", { ascending: false })
+      .limit(3);
+
+    const merged: Item[] = [];
+    const seen = new Set<string>();
+    for (const it of (launched as Item[]) ?? []) {
+      if (!seen.has(it.id) && merged.length < 3) { merged.push(it); seen.add(it.id); }
+    }
+    for (const it of (data as Item[]) ?? []) {
+      if (!seen.has(it.id) && merged.length < 3) { merged.push(it); seen.add(it.id); }
+    }
+    setItems(merged);
+
+    const campaignIds = merged.map((m) => m.spawned_campaign_id).filter(Boolean) as string[];
+    if (campaignIds.length > 0) {
+      const { data: runs } = await supabase
+        .from("campaign_runs")
+        .select("campaign_id, leads_sent, leads_found, target_lead_count, state, updated_at")
+        .in("campaign_id", campaignIds)
+        .order("updated_at", { ascending: false });
+      const map: Record<string, RunProgress> = {};
+      for (const r of runs ?? []) {
+        if (!map[r.campaign_id]) {
+          map[r.campaign_id] = {
+            leads_sent: r.leads_sent,
+            leads_found: r.leads_found,
+            target_lead_count: r.target_lead_count,
+            state: r.state,
+          };
+        }
+      }
+      setRunProgress(map);
+    } else {
+      setRunProgress({});
+    }
+
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const ch = supabase
+      .channel("top-triggers-runs")
+      .on("postgres_changes", { event: "*", schema: "public", table: "campaign_runs" }, load)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
 
   const active = items.find((i) => i.id === openId) ?? null;
   const activeSocial = items.find((i) => i.id === socialId) ?? null;
