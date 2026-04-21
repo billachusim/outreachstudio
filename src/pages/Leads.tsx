@@ -289,6 +289,32 @@ const Leads = () => {
         </TabsList>
       </Tabs>
 
+      {/* Bulk action bar — assign to campaign */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          <span className="font-medium">{selected.size} selected</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="outline"><Inbox className="h-4 w-4" /> Assign to campaign…</Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 space-y-2">
+              <Label className="text-xs">Move {selected.size} lead{selected.size === 1 ? "" : "s"} to:</Label>
+              <Select value={assignTarget} onValueChange={setAssignTarget}>
+                <SelectTrigger><SelectValue placeholder="Pick campaign" /></SelectTrigger>
+                <SelectContent>
+                  {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="flex gap-2">
+                <Button size="sm" className="flex-1" onClick={() => assignTarget && bulkAssign(assignTarget)} disabled={!assignTarget}>Assign</Button>
+                <Button size="sm" variant="outline" onClick={() => bulkAssign(null)} title="Detach">Detach</Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="ml-auto"><X className="h-4 w-4" /> Clear</Button>
+        </div>
+      )}
+
       <BulkDraftBar selectedIds={Array.from(selected)} onClear={() => setSelected(new Set())} onComplete={() => { setSelected(new Set()); load(); }} />
 
       {filtered.length === 0 ? (
