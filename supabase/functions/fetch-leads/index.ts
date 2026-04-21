@@ -821,12 +821,22 @@ async function runFetch(
       const parts: string[] = [];
       if (totalSeen === 0) parts.push("No search results returned by Firecrawl across all queries and fallback variants.");
       else parts.push(`${totalSeen} candidates returned but all were filtered (blocklisted hosts, excluded TLDs, or duplicates of existing leads).`);
+      if (aggregatorsExploded > 0) {
+        parts.push(`Aggregators exploded: ${aggregatorsExploded} · businesses extracted: ${extractedBusinesses} · inserted after dedupe: 0.`);
+      } else if (aggregatorQueue.length > 0) {
+        parts.push(`${aggregatorQueue.length} list/blog pages were detected but explosion produced no usable businesses.`);
+      }
       if (lastSearchError) parts.push(`Last search error: ${lastSearchError}.`);
       parts.push(`Try widening offerings/keywords, raising max retries (current: ${maxRetries}), or checking Firecrawl quota.`);
       failureReason = parts.join(" ");
     }
 
-    await update({ state: "done", failure_reason: failureReason });
+    await update({
+      state: "done",
+      failure_reason: failureReason,
+      aggregators_exploded: aggregatorsExploded,
+      extracted_businesses: extractedBusinesses,
+    });
     log(`✓ Done — ${totalInserted} leads inserted, ~${creditsEstimate} credits used`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
