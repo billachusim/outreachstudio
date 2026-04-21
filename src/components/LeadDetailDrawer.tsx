@@ -168,6 +168,31 @@ export const LeadDetailDrawer = ({ lead, open, onOpenChange, campaigns = [], onD
 
           <Separator />
 
+          {/* Campaign assignment */}
+          <div className="space-y-1.5 text-sm">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Campaign</h3>
+            {editingCampaign ? (
+              <div className="flex items-center gap-2">
+                <Select value={lead.campaign_id ?? "__none__"} onValueChange={(v) => reassign(v === "__none__" ? null : v)}>
+                  <SelectTrigger className="h-9 flex-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Raw (no campaign) —</SelectItem>
+                    {campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button size="sm" variant="ghost" onClick={() => setEditingCampaign(false)}>Cancel</Button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <span className={lead.campaign_id ? "font-medium" : "text-muted-foreground"}>
+                  {currentCampaign?.name ?? (lead.campaign_id ? "(unknown)" : "📥 Raw — unassigned")}
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => setEditingCampaign(true)}>Change</Button>
+              </div>
+            )}
+          </div>
+
+          <Separator />
           {/* Contact block */}
           <div className="space-y-2 text-sm">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Contact</h3>
