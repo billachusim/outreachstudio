@@ -283,34 +283,31 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
       }
     });
 
-    const location = firecrawlLocationParam(region);
+    const searchLocation = firecrawlSearchLocation(region);
+    const scrapeLocation = firecrawlScrapeLocation(region);
     let totalSeen = 0;
     let totalInserted = 0;
     let creditsEstimate = 0;
+    let totalQueriesRun = 0;
     const candidatesForEnrichment: { id: string; signal: number }[] = [];
 
-    // 4. Run searches in batches of MAX_CONCURRENT
-    for (let i = 0; i < planned.length; i += MAX_CONCURRENT) {
-      if (await checkStopped()) {
-        log("Stopped by user", "warn");
-        await update({ state: "stopped" });
-        return;
-      }
-      if (totalInserted >= HARD_CEILING) {
-        log(`Hit hard ceiling of ${HARD_CEILING} leads — stopping searches`);
-        break;
-      }
+    const MIN_TARGET = 30; // if we end below this, run a fallback round
+    const FALLBACK_QUERY_BUDGET = 6;
 
-      const batch = planned.slice(i, i + MAX_CONCURRENT);
+    const processBatch = async (batch: PlannedQuery[]): Promise<{ outOfCredits: boolean; batchInserted: number }> => {
       await update({ current_query: batch[0].icp });
 
-      const results = await Promise.all(batch.map(async (q) => {
-        const regionalQuery = buildAfricanRegionalQuery(q.query, region);
-        const r = await firecrawlSearch(firecrawlKey, regionalQuery, location);
-        return { q, ...r };
-      }));
+      const results = await Promise.all(
+        batch.map(async (q) => {
+          const r = await robustSearch(firecrawlKey, q.query, region, searchLocation);
+          return { q, ...r };
+        }),
+      );
 
-      creditsEstimate += batch.length;
+      const batchAttempts = results.reduce((s, r) => s + r.attempts, 0);
+      creditsEstimate += batchAttempts;
+      totalQueriesRun += batch.length;
+
       let outOfCredits = false;
       const newLeads: any[] = [];
 
@@ -325,13 +322,12 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
           if (isBlockedHost(host)) continue;
           if (isExcludedTld(host) && totalInserted + newLeads.length > 80) continue;
           if (existingDomains.has(host)) continue;
-          existingDomains.add(host); // dedupe within this run
+          existingDomains.add(host);
 
           const businessName = deriveBusinessName(hit.title ?? "", host);
           const desc = (hit.description ?? "").slice(0, 600);
           const note = `Source: AI fetch (${q.icp})\n${desc}`;
 
-          // signal score for picking enrichment candidates
           const signal =
             (desc.length > 200 ? 2 : 0) +
             (businessName.length > 3 && businessName.length < 50 ? 2 : 0) +
@@ -349,6 +345,7 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
         }
       }
 
+      let batchInserted = 0;
       if (newLeads.length > 0) {
         const insertRows = newLeads.map(({ __signal, ...rest }) => rest);
         const { data: inserted, error: insErr } = await supabase
@@ -358,32 +355,73 @@ async function runFetch(supabase: any, runId: string, userId: string, firecrawlK
         if (insErr) {
           log(`Insert error: ${insErr.message}`, "error");
         } else {
-          totalInserted += inserted?.length ?? 0;
+          batchInserted = inserted?.length ?? 0;
+          totalInserted += batchInserted;
           (inserted ?? []).forEach((row: any, idx: number) => {
             candidatesForEnrichment.push({ id: row.id, signal: newLeads[idx].__signal });
           });
           const hq = (inserted ?? []).filter((r: any) => (r.score ?? 0) >= 50).length;
+          const { data: cur } = await supabase.from("lead_fetch_runs").select("high_quality_count").eq("id", runId).maybeSingle();
           await update({
-            queries_run: Math.min(i + batch.length, planned.length),
+            queries_run: totalQueriesRun,
             candidates_seen: totalSeen,
             inserted_count: totalInserted,
-            high_quality_count: ((await supabase.from("lead_fetch_runs").select("high_quality_count").eq("id", runId).maybeSingle()).data?.high_quality_count ?? 0) + hq,
+            high_quality_count: (cur?.high_quality_count ?? 0) + hq,
             credits_estimate: creditsEstimate,
           });
         }
       } else {
         await update({
-          queries_run: Math.min(i + batch.length, planned.length),
+          queries_run: totalQueriesRun,
           candidates_seen: totalSeen,
           credits_estimate: creditsEstimate,
         });
       }
+
+      return { outOfCredits, batchInserted };
+    };
+
+    // 4. Run searches in batches of MAX_CONCURRENT
+    for (let i = 0; i < planned.length; i += MAX_CONCURRENT) {
+      if (await checkStopped()) {
+        log("Stopped by user", "warn");
+        await update({ state: "stopped" });
+        return;
+      }
+      if (totalInserted >= HARD_CEILING) {
+        log(`Hit hard ceiling of ${HARD_CEILING} leads — stopping searches`);
+        break;
+      }
+
+      const batch = planned.slice(i, i + MAX_CONCURRENT);
+      const { outOfCredits } = await processBatch(batch);
 
       if (outOfCredits) {
         log("Firecrawl credits exhausted", "error");
         await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue" });
         return;
       }
+    }
+
+    log(`Initial pass — ${totalInserted} inserted from ${totalSeen} candidates`);
+
+    // 4b. Persistence: if we ended up with too few leads, run broader fallback queries.
+    if (totalInserted < MIN_TARGET && !(await checkStopped()) && totalInserted < HARD_CEILING) {
+      log(`Below target (${totalInserted}/${MIN_TARGET}) — running ${FALLBACK_QUERY_BUDGET} fallback queries`);
+      const fallback = buildFallbackQueries(region, (offRes.data ?? []) as any).slice(0, FALLBACK_QUERY_BUDGET);
+      await update({ queries_planned: planned.length + fallback.length });
+
+      for (let i = 0; i < fallback.length; i += MAX_CONCURRENT) {
+        if (await checkStopped()) break;
+        if (totalInserted >= HARD_CEILING) break;
+        const batch = fallback.slice(i, i + MAX_CONCURRENT);
+        const { outOfCredits } = await processBatch(batch);
+        if (outOfCredits) {
+          await update({ state: "failed", error: "Firecrawl credits exhausted — top up to continue" });
+          return;
+        }
+      }
+      log(`After fallback — ${totalInserted} inserted from ${totalSeen} candidates`);
     }
 
     log(`Search done — ${totalInserted} inserted from ${totalSeen} candidates`);
