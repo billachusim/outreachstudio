@@ -1,8 +1,10 @@
 // Firecrawl-powered lead enrichment: scrapes the lead's website,
-// extracts a contact email + a 1-2 sentence business summary,
+// extracts contact email + phone + socials + a 1-2 sentence summary,
+// optionally infers the contact person via a cheap AI call,
 // and updates the lead record. Returns what was found.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { buildEnrichmentUpdates } from "../_shared/enrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,30 +24,13 @@ const json = (status: number, payload: unknown) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-// Pull plausible emails from text. Filter common placeholder domains.
-function extractEmails(text: string): string[] {
-  const re = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  const found = (text.match(re) ?? []).map((e) => e.toLowerCase());
-  const blocked = ["example.com", "domain.com", "yourdomain.com", "email.com", "test.com"];
-  const unique = Array.from(new Set(found)).filter(
-    (e) => !blocked.some((b) => e.endsWith(`@${b}`)) && !e.endsWith(".png") && !e.endsWith(".jpg"),
-  );
-  // Prefer info@/hello@/contact@/sales@ first
-  const priority = ["contact@", "hello@", "info@", "sales@", "support@", "team@"];
-  unique.sort((a, b) => {
-    const ap = priority.findIndex((p) => a.startsWith(p));
-    const bp = priority.findIndex((p) => b.startsWith(p));
-    return (ap === -1 ? 999 : ap) - (bp === -1 ? 999 : bp);
-  });
-  return unique;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
     if (!FIRECRAWL_API_KEY) return json(500, { error: "FIRECRAWL_API_KEY not configured" });
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") ?? "";
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return json(401, { error: "Missing Authorization header" });
@@ -64,7 +49,7 @@ Deno.serve(async (req) => {
 
     const { data: lead, error: lerr } = await supabase
       .from("leads")
-      .select("id, business_name, website, contact_email, notes, status")
+      .select("id, business_name, website, contact_email, phone, contact_name, notes, status")
       .eq("id", leadId)
       .maybeSingle();
     if (lerr) return json(500, { error: lerr.message });
@@ -74,7 +59,7 @@ Deno.serve(async (req) => {
     let url = lead.website.trim();
     if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
 
-    // Scrape: markdown for parsing emails + AI summary
+    // Scrape: markdown for parsing emails/phones + AI summary + links for socials
     const scrapeRes = await fetch(`${FIRECRAWL_V2}/scrape`, {
       method: "POST",
       headers: {
@@ -95,46 +80,35 @@ Deno.serve(async (req) => {
       });
     }
 
-    // v2 returns fields either at top level or under data
     const payload = scrapeJson.data ?? scrapeJson;
-    const markdown: string = payload.markdown ?? "";
-    const summary: string = payload.summary ?? "";
-    const links: string[] = payload.links ?? [];
+    const updates = await buildEnrichmentUpdates(LOVABLE_API_KEY, lead as any, {
+      markdown: payload.markdown ?? "",
+      summary: payload.summary ?? "",
+      links: payload.links ?? [],
+    });
 
-    // Pull mailto: links too
-    const mailtoEmails = links
-      .filter((l) => l.toLowerCase().startsWith("mailto:"))
-      .map((l) => l.replace(/^mailto:/i, "").split("?")[0].toLowerCase());
+    // Bump status from "new" to "enriched" if appropriate
+    const finalUpdates: Record<string, unknown> = { ...updates };
+    if (lead.status === "new") finalUpdates.status = "enriched";
 
-    const emails = Array.from(new Set([...mailtoEmails, ...extractEmails(markdown)]));
-    const bestEmail = emails[0] ?? null;
-
-    // Build update — don't overwrite existing email/notes; append summary
-    const updates: Record<string, unknown> = {};
-    if (!lead.contact_email && bestEmail) updates.contact_email = bestEmail;
-
-    if (summary) {
-      const summaryBlock = `--- Enriched ${new Date().toISOString().slice(0, 10)} ---\n${summary}`;
-      const existing = (lead.notes ?? "").trim();
-      // Avoid duplicate summary
-      if (!existing.includes(summary.slice(0, 60))) {
-        updates.notes = existing ? `${existing}\n\n${summaryBlock}` : summaryBlock;
-      }
-    }
-
-    if (lead.status === "new") updates.status = "enriched";
-
-    if (Object.keys(updates).length > 0) {
-      const { error: upErr } = await supabase.from("leads").update(updates).eq("id", leadId);
+    if (Object.keys(finalUpdates).length > 0) {
+      const { error: upErr } = await supabase.from("leads").update(finalUpdates).eq("id", leadId);
       if (upErr) return json(500, { error: upErr.message });
     }
 
     return json(200, {
       leadId,
-      email: bestEmail,
-      emailsFound: emails,
-      summary,
-      updated: Object.keys(updates),
+      email: updates.contact_email ?? lead.contact_email ?? null,
+      phone: updates.phone ?? lead.phone ?? null,
+      contact_name: updates.contact_name ?? lead.contact_name ?? null,
+      summary: updates.enrichment_summary ?? null,
+      socials: {
+        linkedin: updates.linkedin_url ?? null,
+        instagram: updates.instagram_url ?? null,
+        facebook: updates.facebook_url ?? null,
+        x: updates.x_url ?? null,
+      },
+      updated: Object.keys(finalUpdates),
     });
   } catch (e) {
     console.error("enrich-lead error", e);
