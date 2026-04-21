@@ -10,7 +10,9 @@ import {
   buildAfricanRegionalQuery,
   buildEnrichmentUpdates,
   fetchUserRegion,
-  firecrawlLocationParam,
+  firecrawlScrapeLocation,
+  firecrawlSearchLocation,
+  type RegionContext,
 } from "../_shared/enrichment.ts";
 
 const corsHeaders = {
