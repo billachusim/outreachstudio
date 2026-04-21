@@ -1,70 +1,82 @@
 
 
-# Auto-launch a campaign from an Intel story
+# Auto-launch campaigns from the daily Top 3 Triggers
 
-A new **"Launch campaign"** button on each intel card that does the entire pipeline in one click: pick or invent an offering → create a campaign tuned to the story → kick the outreach engine that finds, enriches, drafts, and sends.
+Make the dashboard's Top 3 trigger cards *automatically* launch outreach campaigns the moment the daily intel scan finds them — so you wake up to running campaigns instead of buttons to press. Once a trigger has spawned a campaign, its card switches from "🚀 Launch" to "📊 View campaign" linking to the run.
 
-## What you'll see on the Intel page
+## What changes (UX)
 
-A new primary action `🚀 Launch campaign` next to the existing "Draft pitch" / "Create lead" buttons.
+**On the dashboard "Today's top triggers" widget:**
+- Each item now shows a state:
+  - **Auto-launched** (badge) → primary button becomes `📊 View campaign` → navigates to `/campaigns` (with the campaign highlighted) so you can watch lead discovery + sending live.
+  - **Pending / failed to auto-launch** → keeps the existing `🚀 Launch` button (manual fallback).
+- A small subtitle under the card explains: *"Auto-launched 7:42 AM — 0/20 leads found"* (live count from the run).
+- The widget pulls the same Top 3 it always did (highest `relevance_score`, not `acted_on`), but now the auto-launch flag means most of the time they'll already be running.
 
-Click → opens a small confirmation drawer showing:
-- **Offering**: matched existing one OR *"New offering will be created"* with a preview (title, tagline, ideal customer)
-- **Campaign**: name, derived city/category/keywords from the article
-- **Discovery target**: 20 leads, 20/day send cap (your defaults)
+**Studio dashboard "Active runs":**
+- Auto-launched runs already show up here automatically (they're regular `campaign_runs` rows). To make them recognizable, we'll prefix the campaign name with `Auto: ` (matches your existing convention from `startOutreachFromOffering`) and show a small `from intel` badge next to the campaign name.
 
-Two buttons: `Edit details` (open expanded form) or `Launch now`.
+## How it works (under the hood)
 
-After launch → toast + redirect to the Studio dashboard so you can watch the run progress live.
+### 1. New edge function: `auto-launch-top-triggers`
 
-## How it works under the hood
+Server-side cron job that, for each user:
+1. Picks the top 3 unacted-on `intel_items` from the last 24h, ranked by `relevance_score` (skip anything below 60 to avoid junk).
+2. For each one, calls the **existing** `launch-campaign-from-intel` logic (refactored into a shared helper) with `dryRun: false` — same AI proposal → offering match/create → campaign + queued run → kick `campaign-tick`.
+3. Marks the intel `acted_on = true` (the existing function already does this) and stores the resulting `campaign_id` in a new column so the dashboard widget can render the "View campaign" button.
+4. Logs each launch to `run_events` with kind `auto_launched_from_intel`.
 
-### New edge function: `launch-campaign-from-intel`
+Failures are isolated: if one trigger's launch fails (AI couldn't match an offering, etc.), the other two still run, and the failed one falls back to the manual `🚀 Launch` button.
 
-Takes `{ intelItemId }`, runs server-side:
+### 2. Tiny refactor of `launch-campaign-from-intel`
 
-1. **Load** the intel item + user's offerings + agent memory.
-2. **Match or create offering** via one Lovable AI call (`gemini-2.5-flash`, structured tool output):
-   - Input: intel title/summary/tags + list of existing offerings (id, title, tagline).
-   - Output: either `{ matchedOfferingId }` OR `{ newOffering: { title, tagline, problem_solved, ideal_customer, target_audience, trigger_keywords[] } }`.
-   - If new → insert into `offerings`.
-3. **Derive campaign params** from the same AI call:
-   - `name` (e.g. "Intel: Dangote expansion — 21 Apr"), `city`, `category`, `keywords`, `discovery_source` (`google_places` if local-business signal, else `firecrawl`).
-4. **Insert campaign** linked to that offering, status `active`, `email_cap = 20`.
-5. **Insert `campaign_runs` row** (`state: queued`, target 20 leads) — same shape `startOutreach` uses.
-6. **Mark intel** `acted_on = true`, store campaign id in a new note ("Spawned campaign X").
-7. **Invoke `campaign-tick`** with the new run id (fire-and-forget) so discovery starts immediately.
-8. Return `{ campaignId, runId, offeringId, offeringCreated: bool }`.
+Extract the "execute the launch" branch into an exported `runLaunch(supabase, userId, intelItemId, proposal?)` helper so the cron function can call it directly without a second HTTP hop. The HTTP entrypoint stays unchanged — the existing manual button keeps working.
 
-The existing `campaign-tick` engine then handles the rest with no changes — discovery → enrichment → drafting → sending — using the new offering as pitch context and the keywords/city/category we set.
+### 3. Schema: one new column on `intel_items`
 
-### New component: `IntelLaunchCampaignDrawer.tsx`
+```
+intel_items.spawned_campaign_id uuid null
+```
 
-- Calls `launch-campaign-from-intel` with `dryRun: true` first → shows the AI's proposal.
-- User can edit the campaign name, city, category, keywords, channel (email/whatsapp), and toggle "use existing offering vs create new" before confirming.
-- Confirm → calls again with `dryRun: false` → toast + `navigate("/")`.
+Set when a launch (auto or manual) succeeds. Drives the "View campaign" CTA on the widget.
 
-The dry-run/confirm split costs 1 AI call total (we cache the proposal in component state between the two server calls — the second call accepts the already-decided params and skips AI).
+### 4. Cron schedule
 
-### Files
+A new pg_cron job runs `auto-launch-top-triggers` once a day at **08:05 WAT** — 5 minutes after the existing daily-briefing tick, ensuring fresh intel from the morning scan is already in the table. (We'll add this via the schedule pattern using the project anon key + service role auth.)
 
-- **New** `supabase/functions/launch-campaign-from-intel/index.ts` — orchestrator above.
-- **New** `src/components/IntelLaunchCampaignDrawer.tsx` — the confirm UI.
-- **Edit** `src/pages/Intel.tsx` — add `🚀 Launch campaign` button on each card; mount the drawer.
-- **Edit** `src/components/TopTriggersWidget.tsx` — add the same button (so you can launch from the dashboard widget too).
+### 5. Wire-up: `TopTriggersWidget.tsx`
+
+- Query also selects `spawned_campaign_id`.
+- If set → render `📊 View campaign` button linking to `/campaigns?highlight={id}` (Campaigns page already lists all campaigns; the highlight param can scroll to it — minor add).
+- If not set → keep current `🚀 Launch` / `Pitch` / `Post` buttons as fallback.
+- Live progress subtitle joins `campaign_runs` (latest run for that campaign) to show `leads_sent / target_lead_count`.
+
+### 6. Wire-up: `Dashboard.tsx` → Active runs
+
+- When loading campaigns, also fetch the campaign name's `auto_from_intel` flag (we'll know via the `Auto: ` name prefix, or cleaner: a new boolean column on `campaigns`. Simpler path: prefix the name and show a `from intel` badge based on prefix match — no schema change). Going with the prefix approach to keep this small.
 
 ## Cost & safety
 
-- 1 AI call per launch (cached between dry-run and confirm).
-- Campaign and run rows are real DB inserts — same as if you'd built it manually in the Campaigns tab. You can pause/end the run from the dashboard like any other.
-- If the AI can't pick or invent a sensible offering (e.g. unrelated story) the function returns 422 with a clear message and creates nothing.
+- **AI cost:** 1 Gemini Flash call per top-trigger per day = 3 calls/day max per user. Negligible.
+- **Outreach cost:** Each auto-launched run respects your global `email_cap = 20` and `target_lead_count = 20`. Three triggers = up to 60 leads/day discovered, 60 emails/day max — same as if you launched them manually.
+- **Safety net:** The cron only runs once daily and only on items not yet acted on. New offerings invented by the AI are saved as `status: 'draft'` (per the prior approved decision). You can pause/end any auto-launched run from the dashboard with the bin icon, same as a manual run.
+- **No surprise spam:** If the AI can't pick or invent a sensible offering for a story (returns 422), nothing is created — the trigger stays in the widget for you to handle manually.
+
+## Files
+
+- **New** `supabase/functions/auto-launch-top-triggers/index.ts` — cron orchestrator, loops users → top 3 intel → calls shared helper.
+- **Edit** `supabase/functions/launch-campaign-from-intel/index.ts` — extract shared `runLaunch()` helper + write `spawned_campaign_id` after success.
+- **New migration** — add `intel_items.spawned_campaign_id uuid` column.
+- **New cron migration** (data, via insert tool) — schedule `auto-launch-top-triggers` daily at 08:05 WAT.
+- **Edit** `src/components/TopTriggersWidget.tsx` — render "View campaign" CTA when `spawned_campaign_id` is set; show live progress subtitle.
+- **Edit** `src/pages/Dashboard.tsx` — small "from intel" badge on auto-launched active runs (detected via `Auto:` name prefix).
 
 ## Open question
 
-When the AI **invents a new offering**, should it:
+Should the auto-launch run on **all unacted-on intel from the last 24h** (current plan: top 3 by score, min 60), or also **catch up on yesterday's untouched high-scoring items** the first time the cron runs each day?
 
-- **A:** Save it as `status: 'draft'` so it doesn't pollute your active offerings list until you review it. *(Recommended — safer.)*
-- **B:** Save as `status: 'active'` immediately so it shows up everywhere right away.
+- **A:** Top 3 from last 24h only — clean and predictable. Recommended.
+- **B:** Top 3 from last 48h, so anything that arrived overnight after a missed day still gets picked up.
 
 Default if no answer: **A**.
 
