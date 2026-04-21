@@ -214,7 +214,16 @@ const Offerings = () => {
         </div>
       </div>
 
-      {loading ? (
+      <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Heads up about "Refresh defaults"</AlertTitle>
+        <AlertDescription>
+          That button <strong>overwrites every editable field</strong> on the 12 built-in offerings (matched by title). Cards marked
+          <Badge variant="outline" className="mx-1 text-[10px]">default</Badge> below are at risk.
+          Your custom offerings, plus <code className="font-mono text-xs">trigger_keywords</code>, <code className="font-mono text-xs">auto_lead_from_intel</code>, status, campaigns, leads, pitches and intel are all left untouched.
+        </AlertDescription>
+      </Alert>
+
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : offerings.length === 0 ? (
         <Card>
