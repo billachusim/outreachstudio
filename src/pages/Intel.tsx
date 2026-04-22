@@ -4,9 +4,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, RefreshCw, Check, Newspaper, Sparkles, UserPlus, Settings, Share2, Link as LinkIcon, Rocket } from "lucide-react";
+import { ExternalLink, RefreshCw, Check, Newspaper, Sparkles, UserPlus, Settings, Share2, Link as LinkIcon, Rocket, Clock, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
+
+// Intel scan cron: '0 6 * * *' UTC (daily at 06:00 UTC)
+const INTEL_SCAN_HOUR_UTC = 6;
+const getNextScanAt = (): Date => {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), INTEL_SCAN_HOUR_UTC, 0, 0));
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+};
 import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
 import { IntelLeadDrawer } from "@/components/IntelLeadDrawer";
 import { IntelLaunchCampaignDrawer } from "@/components/IntelLaunchCampaignDrawer";
@@ -36,6 +45,8 @@ const Intel = () => {
   const [leadOpen, setLeadOpen] = useState<IntelItem | null>(null);
   const [launchOpen, setLaunchOpen] = useState<IntelItem | null>(null);
   const [draftingSocial, setDraftingSocial] = useState<string | null>(null);
+  const [lastScanAt, setLastScanAt] = useState<Date | null>(null);
+  const [nextScanAt, setNextScanAt] = useState<Date>(getNextScanAt());
 
   const load = async () => {
     setLoading(true);
@@ -47,6 +58,15 @@ const Intel = () => {
       .limit(60);
     if (error) toast.error(error.message);
     setItems((data as IntelItem[]) ?? []);
+    // Most recent created_at = last successful scan
+    const { data: latest } = await supabase
+      .from("intel_items")
+      .select("created_at")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setLastScanAt(latest?.created_at ? new Date(latest.created_at) : null);
+    setNextScanAt(getNextScanAt());
     setLoading(false);
   };
 
@@ -115,6 +135,30 @@ const Intel = () => {
           </Button>
         </div>
       </div>
+
+      {/* Cron status banner */}
+      <Card>
+        <CardContent className="p-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            {lastScanAt ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+            ) : (
+              <AlertCircle className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <span className="text-muted-foreground">Last scan:</span>
+            <span className="font-medium">
+              {lastScanAt ? formatDistanceToNow(lastScanAt, { addSuffix: true }) : "no data yet"}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">Next scheduled scan:</span>
+            <span className="font-medium">
+              {format(nextScanAt, "MMM d, HH:mm")} UTC ({formatDistanceToNow(nextScanAt, { addSuffix: true })})
+            </span>
+          </div>
+        </CardContent>
+      </Card>
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
