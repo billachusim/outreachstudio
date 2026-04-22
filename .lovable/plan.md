@@ -1,117 +1,79 @@
 
 
-# Discover & auto-promote intel sources
+# ✨ Work leads — bulk enrichment only
 
-Two related upgrades to Intel sources, both about turning your real lead-discovery activity into a self-growing list of news/listicle sources.
+Scoped down per your call: the button **only enriches**. Drafting and sending stay with campaigns, which already pick eligible leads and reuse them across different campaigns.
 
-## Part 1 — "Discover sources" button (manual, AI-powered)
+## Where it lives
 
-A new button on **Intel → Sources** that asks the AI: *"given everything this user knows and targets, what news sites, blogs, and directories would be richest sources of triggers and lead lists?"* Then it validates each suggestion with Firecrawl and shows them as clickable cards you can add with one click.
-
-**Where:** `src/pages/IntelSources.tsx` — new card *"Discover new sources"* between "Add a custom source" and "Your sources":
+A new **`✨ Work leads`** button + batch-size picker in the Leads page header, next to `✨ Fetch leads`.
 
 ```
-┌─ Discover new sources ───────────────────────────────────┐
-│ Find news sites, blogs and directories that match your    │
-│ offerings and region.                  [ ✨ Discover ]    │
-│                                                            │
-│ ▸ Disrupt Africa  https://disrupt-africa.com/             │
-│   Pan-African startup news — matches your fintech ICP     │
-│                                            [ + Add ]      │
-│ ▸ Ventures Africa  https://venturesafrica.com/             │
-│   ...                                       [ + Add ]      │
-└────────────────────────────────────────────────────────────┘
+[ ✨ Fetch leads ] [ ✨ Work leads  ▾ ] [ Import CSV ] [ + Add lead ]
+                          │
+                          └─ Batch: 50 ▾
+                             Need enrichment in view: 184
+                             [ Start ]
 ```
 
-**Backend** — new edge function `supabase/functions/discover-intel-sources/index.ts`:
+Popover contents:
+- **Batch size**: `25 · 50 · 100 · 200 · 500` (default 50).
+- **Live counter**: how many leads in the current filtered view actually need enrichment.
+- **Start** button (disabled if counter is 0 or a job is already running).
 
-1. Gather context (same shape as `fetch-leads` planner): `profiles.outreach_region`, `offerings` (titles, audiences, keywords), `agent_memories`, `campaigns` (categories), and existing `intel_sources` + the built-in `DEFAULT_SOURCES` so we don't suggest dupes.
-2. **One AI call** (`gemini-2.5-flash`, structured tool call) — returns 5–8 candidates: `{name, url, why_relevant, type: "news"|"blog"|"directory"|"listicle"}`.
-3. **Validate each candidate** — parallel Firecrawl `/v2/map?limit=5` calls (5 cheap credits total). Drops any URL that fails to map. Filters out anything already in user's sources or `DEFAULT_SOURCES`.
-4. Returns `{ suggestions: [...] }` to the frontend (does not insert — user decides).
+If leads are selected, the worker uses the selection (still capped to batch size). Otherwise it picks the first N leads from the current filter that need enrichment.
 
-Frontend then offers a one-click `+ Add` per suggestion that inserts into `intel_sources` exactly like the existing manual form. A `Refresh` button re-runs discovery to get a different batch.
+## What "needs enrichment" means
 
-**Cost per click:** 1 cheap AI call + up to 8 Firecrawl `/map` calls (≈ 8 credits) — runs once on demand, not on a schedule.
+A lead is enrichable when **all** are true:
+- Has a `website` (otherwise `enrich-lead` returns 400 — nothing to do).
+- `last_enriched_at IS NULL` **OR** `contact_email IS NULL` (i.e. never enriched, or enrichment didn't yield contact info worth keeping).
+- Status is not `won` / `lost` / `unsubscribed` (don't waste credits on dead leads).
 
-## Part 2 — Auto-promote aggregators that produce quality leads
+Anything else → skipped (counted, not failed).
 
-When `fetch-leads` explodes a listicle/aggregator and that listicle yields **≥3 leads that end up scoring ≥50** (after the enrichment burst), we auto-add the aggregator's host to `intel_sources` so the next nightly `scan-intel` keeps mining it.
+## How it runs
 
-### How we track it
+Pure client-side orchestration, mirroring the existing `BulkDraftBar` pattern — calls the existing `enrich-lead` edge function once per lead. No new backend, no schema changes.
 
-New table `aggregator_performance`:
+- Sequential for batches ≤ 50.
+- 2 in parallel for batches ≥ 100 (small worker pool — keeps Firecrawl happy).
+- One sticky progress strip with live counts:
 
-```sql
-create table public.aggregator_performance (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  host text not null,              -- e.g. "techcabal.com"
-  source_url text not null,        -- last seen aggregator page URL (for naming)
-  total_extracted int not null default 0,    -- businesses pulled from this host
-  total_high_quality int not null default 0, -- of those, how many scored >=50
-  promoted_to_intel bool not null default false,
-  promoted_at timestamptz,
-  last_seen_at timestamptz not null default now(),
-  created_at timestamptz not null default now(),
-  unique (user_id, host)
-);
--- RLS: own rows only.
+```
+Enriching leads…  ▓▓▓▓▓▓░░░  34 / 50
+✓ 28 enriched · ⊘ 4 skipped (no website) · ✗ 2 failed       [ Stop ]
 ```
 
-### Wiring inside `fetch-leads/index.ts`
+- **Stop** cancels gracefully between leads — already-enriched leads stay enriched.
+- Final summary toast: *"Enriched 28 leads · 4 skipped · 2 failed."*
+- Re-pressing while running is disabled.
 
-In the `explodeAggregators()` helper (after children inserted), upsert a row keyed on `(user_id, host)`:
-- `total_extracted` += businesses extracted from this host this run
-- `total_high_quality` += inserted leads scoring ≥50 from this host this run
-- `last_seen_at = now()`, `source_url = agg.hit.url`
+## Header counter (small UX win)
 
-**Then immediately after the enrichment burst** (so scores are settled), one pass:
+Add one chip to the existing counter line so you can see at a glance whether the button will do anything:
 
-```sql
--- pseudo
-for each row in aggregator_performance
-  where user_id = $1 and not promoted_to_intel
-    and total_high_quality >= 3
-    and host not in (DEFAULT_SOURCES) and host not in (existing intel_sources):
-  insert into intel_sources (user_id, name, url, enabled) values
-    ($1, <Title-cased host>, 'https://<host>/', true);
-  update aggregator_performance set promoted_to_intel = true, promoted_at = now() where id = $row;
-  log event "Auto-added intel source: <host> (3+ quality leads from listicles)"
-```
-
-### What the user sees
-
-- A new line in the fetch-leads run summary card: *"Promoted 2 new intel sources: techcabal.com, disrupt-africa.com"* (when applicable).
-- The new sources appear automatically in **Intel → Sources** under "Your sources" with a small `Auto-promoted` badge so you know how they got there.
-- A toast on the Leads page when a run finishes if any promotions happened: *"2 new intel sources auto-added — view"* (link to `/intel/sources`).
-
-## Schema changes
-
-1. New migration: `aggregator_performance` table + RLS (own rows: select/insert/update/delete) + unique index `(user_id, host)`.
-2. Add column to `intel_sources`: `auto_promoted bool not null default false` so the UI can show the badge.
+> 312 leads · 18 hot · 47 ready · **184 need enrichment** · 22 raw
 
 ## Files to change
 
-**Backend**
-- New: `supabase/functions/discover-intel-sources/index.ts` (AI + Firecrawl map validation).
-- Edit: `supabase/functions/fetch-leads/index.ts` — track per-host stats during explosion, run promotion check after enrichment, include promoted hosts count in final `update({...})` so frontend sees them.
-- Edit: `src/integrations/supabase/types.ts` (auto-regenerated after migration).
+**Frontend only — no backend, no DB**
+- New: `src/components/WorkLeadsButton.tsx` — button, popover, router (just enrichment), progress strip, calls `enrich-lead` edge fn (already exists).
+- Edit: `src/pages/Leads.tsx`
+  - Render `<WorkLeadsButton leads={filtered} selectedIds={...} onComplete={load} />` in the header next to `Fetch leads`.
+  - Extend the existing `counters` `useMemo` to compute `needsEnrichment` (website present + (`last_enriched_at` null OR no email) + not won/lost/unsubscribed).
 
-**Frontend**
-- Edit: `src/pages/IntelSources.tsx` — add "Discover new sources" card, suggestion list with `+ Add` buttons, `Auto-promoted` badge in user sources list.
-- Edit: `src/components/FetchLeadsProgress.tsx` — read a new `promoted_sources_count` field from the run row (added to migration) and render it in the post-run summary as *"Promoted N source(s) to Intel."* Also surface a toast → link.
+## Edge cases handled
 
-**Migration**
-- `aggregator_performance` table.
-- `intel_sources.auto_promoted` boolean.
-- `lead_fetch_runs.promoted_sources_count int default 0` for surfacing in the run summary.
+- **No website** → skipped, not failed. Counter explains it.
+- **`enrich-lead` returns "no email found"** → still counts as enriched success (Firecrawl ran, summary saved); it just won't become a campaign target until you give it an email another way.
+- **Firecrawl rate limit / 402 credits** → that lead counts as failed; loop continues; final toast surfaces failure count.
+- **Filter/tab changed mid-run** → batch IDs locked at start, finishes the chosen N.
+- **Lead already fully enriched (has email + `last_enriched_at`)** → not selected by the counter; if forced via selection, still skipped.
 
-## Cost & safety
+## Why this is the right call
 
-- Discover button: ≤9 credits per click (1 AI + 8 map calls), user-initiated only.
-- Auto-promotion: zero extra cost — piggy-backs on the existing fetch-leads run. Only adds 1 small SQL query at the end of each run.
-- Promotion threshold (3+ quality leads from one host) prevents one-off accidental promotions.
-- Hard guard: never promote hosts in `HOST_BLOCKLIST` (social/search/marketplaces) even if they somehow appear.
-- All promoted sources start `enabled = true` but the user can toggle them off in the existing Sources UI.
+You're right — keeping enrich/draft/send fused on one button risks burning AI credits drafting pitches that the campaign system would have drafted anyway with its own targeting + rotation logic. Splitting them means:
+- `Work leads` = cheap prep (Firecrawl scrape + tiny AI summary per lead).
+- Campaigns = the orchestrator that picks quality leads, drafts in its tone, and avoids reusing the same lead inside the same campaign.
 
