@@ -204,12 +204,13 @@ const Leads = () => {
         <div>
           <h1 className="text-xl font-semibold sm:text-2xl">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready</span> · {counters.needs} need enrichment · <span className="text-foreground">{counters.raw} raw</span>
+            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready</span> · {counters.needs} need enrichment · <span className="text-foreground">{counters.raw} raw</span> · <span className="text-warning">{counters.needEnrich} to enrich</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="gap-1"><Globe className="h-3 w-3" />Region: {region}</Badge>
           <FetchLeadsProgress onChange={(r) => { if (r && (r.state === "done" || r.state === "stopped" || r.state === "searching" || r.state === "enriching")) load(); }} />
+          <WorkLeadsButton leads={filtered} selectedIds={Array.from(selected)} onComplete={load} />
           <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
             <Upload className="h-4 w-4" /> Import CSV
           </Button>
