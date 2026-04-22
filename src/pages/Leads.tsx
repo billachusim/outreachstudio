@@ -21,6 +21,7 @@ import { LeadDetailDrawer, type LeadDetail } from "@/components/LeadDetailDrawer
 import { LeadCard } from "@/components/LeadCard";
 import { ImportLeadsDialog } from "@/components/ImportLeadsDialog";
 import { FetchLeadsProgress } from "@/components/FetchLeadsProgress";
+import { WorkLeadsButton, needsEnrichment } from "@/components/WorkLeadsButton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const RAW_VALUE = "__raw__";
