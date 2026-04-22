@@ -4,9 +4,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, RefreshCw, Check, Newspaper, Sparkles, UserPlus, Settings, Share2, Link as LinkIcon, Rocket } from "lucide-react";
+import { ExternalLink, RefreshCw, Check, Newspaper, Sparkles, UserPlus, Settings, Share2, Link as LinkIcon, Rocket, Clock, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
+
+// Intel scan cron: '0 6 * * *' UTC (daily at 06:00 UTC)
+const INTEL_SCAN_HOUR_UTC = 6;
+const getNextScanAt = (): Date => {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), INTEL_SCAN_HOUR_UTC, 0, 0));
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+};
 import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
 import { IntelLeadDrawer } from "@/components/IntelLeadDrawer";
 import { IntelLaunchCampaignDrawer } from "@/components/IntelLaunchCampaignDrawer";
