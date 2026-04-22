@@ -111,7 +111,8 @@ const Leads = () => {
     const ready = leads.filter((l) => l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status)).length;
     const needs = leads.filter((l) => !l.contact_email && !l.phone).length;
     const raw = leads.filter((l) => !l.campaign_id).length;
-    return { total, hot, ready, needs, raw };
+    const needEnrich = leads.filter(needsEnrichment).length;
+    return { total, hot, ready, needs, raw, needEnrich };
   }, [leads]);
 
   const filtered = useMemo(() => {
