@@ -136,6 +136,30 @@ const Intel = () => {
         </div>
       </div>
 
+      {/* Cron status banner */}
+      <Card>
+        <CardContent className="p-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            {lastScanAt ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+            ) : (
+              <AlertCircle className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <span className="text-muted-foreground">Last scan:</span>
+            <span className="font-medium">
+              {lastScanAt ? formatDistanceToNow(lastScanAt, { addSuffix: true }) : "no data yet"}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">Next scheduled scan:</span>
+            <span className="font-medium">
+              {format(nextScanAt, "MMM d, HH:mm")} UTC ({formatDistanceToNow(nextScanAt, { addSuffix: true })})
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : items.length === 0 ? (
