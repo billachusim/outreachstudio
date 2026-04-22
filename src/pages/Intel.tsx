@@ -45,6 +45,8 @@ const Intel = () => {
   const [leadOpen, setLeadOpen] = useState<IntelItem | null>(null);
   const [launchOpen, setLaunchOpen] = useState<IntelItem | null>(null);
   const [draftingSocial, setDraftingSocial] = useState<string | null>(null);
+  const [lastScanAt, setLastScanAt] = useState<Date | null>(null);
+  const [nextScanAt, setNextScanAt] = useState<Date>(getNextScanAt());
 
   const load = async () => {
     setLoading(true);
@@ -56,6 +58,15 @@ const Intel = () => {
       .limit(60);
     if (error) toast.error(error.message);
     setItems((data as IntelItem[]) ?? []);
+    // Most recent created_at = last successful scan
+    const { data: latest } = await supabase
+      .from("intel_items")
+      .select("created_at")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setLastScanAt(latest?.created_at ? new Date(latest.created_at) : null);
+    setNextScanAt(getNextScanAt());
     setLoading(false);
   };
 
