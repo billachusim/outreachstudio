@@ -5,8 +5,14 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 const json = (s: number, p: unknown) =>
-  new Response(JSON.stringify(p), { status: s, headers: { "Content-Type": "application/json" } });
+  new Response(JSON.stringify(p), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 const DEFAULT_SOURCES = [
   { name: "techcabal",   url: "https://techcabal.com/",                 limit: 12 },
@@ -248,7 +254,7 @@ async function runScanJob(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_
 }
 
 Deno.serve((req) => {
-  if (req.method === "OPTIONS") return new Response(null);
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
