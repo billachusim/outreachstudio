@@ -119,6 +119,29 @@ const Campaigns = () => {
     if (error) toast({ title: "Update failed", description: error.message, variant: "destructive" });
   };
 
+  const archiveCampaign = async (id: string) => {
+    const { error } = await supabase.from("campaigns").update({ status: "archived" } as never).eq("id", id);
+    if (error) return toast({ title: "Archive failed", description: error.message, variant: "destructive" });
+    setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, status: "archived" } : c)));
+    toast({ title: "Campaign archived" });
+  };
+
+  const reactivateCampaign = async (id: string) => {
+    const { error } = await supabase.from("campaigns").update({ status: "active" } as never).eq("id", id);
+    if (error) return toast({ title: "Reactivate failed", description: error.message, variant: "destructive" });
+    setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, status: "active" } : c)));
+    toast({ title: "Campaign reactivated" });
+  };
+
+  const deleteCampaign = async (id: string) => {
+    // Detach leads first so the FK doesn't block delete
+    await supabase.from("leads").update({ campaign_id: null } as never).eq("campaign_id", id);
+    const { error } = await supabase.from("campaigns").delete().eq("id", id);
+    if (error) return toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+    setCampaigns((prev) => prev.filter((c) => c.id !== id));
+    toast({ title: "Campaign deleted", description: "Its leads were moved to the raw pool." });
+  };
+
   return (
     <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
