@@ -239,11 +239,15 @@ const Campaigns = () => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {campaigns.map((c) => {
+        (() => {
+          const active = campaigns.filter((c) => c.status !== "archived");
+          const archived = campaigns.filter((c) => c.status === "archived");
+
+          const renderCard = (c: Campaign) => {
             const offering = offerings.find((o) => o.id === c.offering_id);
+            const isArchived = c.status === "archived";
             return (
-              <Card key={c.id} className="h-full transition-colors hover:border-primary/50">
+              <Card key={c.id} className={`h-full transition-colors hover:border-primary/50 ${isArchived ? "opacity-75" : ""}`}>
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
                     <Link to={`/leads?campaign=${c.id}`}>
@@ -256,95 +260,162 @@ const Campaigns = () => {
                 <CardContent className="space-y-3 text-sm text-muted-foreground">
                   {c.city && <p>📍 {c.city}</p>}
                   {c.category && <p>🏷️ {c.category}</p>}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Discovery source</Label>
-                    <Select
-                      value={c.discovery_source ?? "firecrawl"}
-                      onValueChange={(v: "firecrawl" | "google_places") => updateSource(c.id, v)}
-                    >
-                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="firecrawl">Firecrawl</SelectItem>
-                        <SelectItem value="google_places">Google Places</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
 
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[10px] uppercase">Email/day</Label>
-                      <Input
-                        type="number" min={0} max={500}
-                        className="h-8 text-xs"
-                        value={c.email_cap ?? 50}
-                        onChange={(e) => updateCampaign(c.id, { email_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] uppercase">WApp/day</Label>
-                      <Input
-                        type="number" min={0} max={500}
-                        className="h-8 text-xs"
-                        value={c.whatsapp_cap ?? 50}
-                        onChange={(e) => updateCampaign(c.id, { whatsapp_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] uppercase">Social/day</Label>
-                      <Input
-                        type="number" min={0} max={500}
-                        className="h-8 text-xs"
-                        value={c.social_cap ?? 10}
-                        onChange={(e) => updateCampaign(c.id, { social_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
-                      />
-                    </div>
-                  </div>
+                  {!isArchived && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Discovery source</Label>
+                        <Select
+                          value={c.discovery_source ?? "firecrawl"}
+                          onValueChange={(v: "firecrawl" | "google_places") => updateSource(c.id, v)}
+                        >
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="firecrawl">Firecrawl</SelectItem>
+                            <SelectItem value="google_places">Google Places</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-                  <div className="space-y-1">
-                    <Label className="text-[10px] uppercase">Follow-up days</Label>
-                    <Input
-                      className="h-8 text-xs"
-                      placeholder="3, 7, 14"
-                      value={(c.follow_up_days ?? [3, 7, 14]).join(", ")}
-                      onChange={(e) => {
-                        const days = e.target.value
-                          .split(",")
-                          .map((s) => parseInt(s.trim(), 10))
-                          .filter((n) => Number.isFinite(n) && n > 0);
-                        updateCampaign(c.id, { follow_up_days: days });
-                      }}
-                    />
-                  </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase">Email/day</Label>
+                          <Input
+                            type="number" min={0} max={500}
+                            className="h-8 text-xs"
+                            value={c.email_cap ?? 50}
+                            onChange={(e) => updateCampaign(c.id, { email_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase">WApp/day</Label>
+                          <Input
+                            type="number" min={0} max={500}
+                            className="h-8 text-xs"
+                            value={c.whatsapp_cap ?? 50}
+                            onChange={(e) => updateCampaign(c.id, { whatsapp_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase">Social/day</Label>
+                          <Input
+                            type="number" min={0} max={500}
+                            className="h-8 text-xs"
+                            value={c.social_cap ?? 10}
+                            onChange={(e) => updateCampaign(c.id, { social_cap: Math.max(0, parseInt(e.target.value || "0", 10)) })}
+                          />
+                        </div>
+                      </div>
 
-                  <label className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={c.auto_followup ?? true}
-                      onChange={(e) => updateCampaign(c.id, { auto_followup: e.target.checked })}
-                      className="h-3.5 w-3.5"
-                    />
-                    Auto follow-up sequences
-                  </label>
-                  <Button
-                    size="sm"
-                    onClick={async () => {
-                      if (!user) return;
-                      try {
-                        await startOutreach({ userId: user.id, campaignId: c.id });
-                        toast({ title: "Outreach started", description: "Engine is running. Watch Studio for progress." });
-                        navigate("/");
-                      } catch (e: any) {
-                        toast({ title: "Could not start", description: e?.message, variant: "destructive" });
-                      }
-                    }}
-                  >
-                    <Rocket className="h-3.5 w-3.5" /> Start Outreach
-                  </Button>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase">Follow-up days</Label>
+                        <Input
+                          className="h-8 text-xs"
+                          placeholder="3, 7, 14"
+                          value={(c.follow_up_days ?? [3, 7, 14]).join(", ")}
+                          onChange={(e) => {
+                            const days = e.target.value
+                              .split(",")
+                              .map((s) => parseInt(s.trim(), 10))
+                              .filter((n) => Number.isFinite(n) && n > 0);
+                            updateCampaign(c.id, { follow_up_days: days });
+                          }}
+                        />
+                      </div>
+
+                      <label className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={c.auto_followup ?? true}
+                          onChange={(e) => updateCampaign(c.id, { auto_followup: e.target.checked })}
+                          className="h-3.5 w-3.5"
+                        />
+                        Auto follow-up sequences
+                      </label>
+                    </>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {!isArchived ? (
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            if (!user) return;
+                            try {
+                              await startOutreach({ userId: user.id, campaignId: c.id });
+                              toast({ title: "Outreach started", description: "Engine is running. Watch Studio for progress." });
+                              navigate("/");
+                            } catch (e: any) {
+                              toast({ title: "Could not start", description: e?.message, variant: "destructive" });
+                            }
+                          }}
+                        >
+                          <Rocket className="h-3.5 w-3.5" /> Start Outreach
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => archiveCampaign(c.id)}>
+                          <Archive className="h-3.5 w-3.5" /> Archive
+                        </Button>
+                      </>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => reactivateCampaign(c.id)}>
+                        <RotateCcw className="h-3.5 w-3.5" /> Reactivate
+                      </Button>
+                    )}
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive ml-auto">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete "{c.name}"?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            The campaign will be removed permanently. Its {counts[c.id] ?? 0} lead{counts[c.id] === 1 ? "" : "s"} will be detached and moved to the raw pool — they won't be deleted.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => deleteCampaign(c.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            Delete campaign
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 </CardContent>
               </Card>
             );
-          })}
-        </div>
+          };
+
+          return (
+            <Tabs defaultValue="active" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
+                <TabsTrigger value="archived">Archived ({archived.length})</TabsTrigger>
+              </TabsList>
+              <TabsContent value="active" className="mt-0">
+                {active.length === 0 ? (
+                  <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">
+                    No active campaigns. Start one from the Offerings page or create one above.
+                  </CardContent></Card>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{active.map(renderCard)}</div>
+                )}
+              </TabsContent>
+              <TabsContent value="archived" className="mt-0">
+                {archived.length === 0 ? (
+                  <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">
+                    No archived campaigns yet.
+                  </CardContent></Card>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{archived.map(renderCard)}</div>
+                )}
+              </TabsContent>
+            </Tabs>
+          );
+        })()
       )}
     </div>
   );
