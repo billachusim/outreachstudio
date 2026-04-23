@@ -223,7 +223,7 @@ const Leads = () => {
         <div>
           <h1 className="text-xl font-semibold sm:text-2xl">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            {counters.total} leads · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready</span> · {counters.needs} need enrichment · <span className="text-foreground">{counters.raw} raw</span> · <span className="text-warning">{counters.needEnrich} to enrich</span>
+            {counters.total} leads{leads.length < counters.total ? ` (showing ${leads.length})` : ""} · <span className="text-success">{counters.hot} hot</span> · <span className="text-primary">{counters.ready} ready</span> · {counters.needs} need enrichment · <span className="text-foreground">{counters.raw} raw</span> · <span className="text-warning">{counters.needEnrich} to enrich</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
