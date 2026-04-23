@@ -420,6 +420,14 @@ const Leads = () => {
         </Card>
       )}
 
+      {leads.length < totalCount && (
+        <div className="flex justify-center pt-2">
+          <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading…" : `Load more (${totalCount - leads.length} remaining)`}
+          </Button>
+        </div>
+      )}
+
       <PitchDrawer lead={pitchLead as any} open={pitchOpen} onOpenChange={setPitchOpen} onSaved={load} />
       <LeadDetailDrawer
         lead={detailLead}
