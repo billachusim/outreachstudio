@@ -20,6 +20,7 @@ import { IntelPitchDrawer } from "@/components/IntelPitchDrawer";
 import { IntelLeadDrawer } from "@/components/IntelLeadDrawer";
 import { IntelLaunchCampaignDrawer } from "@/components/IntelLaunchCampaignDrawer";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type IntelItem = {
   id: string;
