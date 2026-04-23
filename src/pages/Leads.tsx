@@ -95,7 +95,10 @@ const Leads = () => {
     else if (campaignFilter) leadsQuery = leadsQuery.eq("campaign_id", campaignFilter);
     const [{ data: cs }, leadsRes, { data: prof }] = await Promise.all([
       supabase.from("campaigns").select("id,name").order("name"),
-      leadsQuery.order("score", { ascending: false }).order("created_at", { ascending: false }),
+      leadsQuery
+        .order("score", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(0, 9999),
       supabase.from("profiles").select("outreach_region").eq("user_id", user.id).maybeSingle(),
     ]);
     setCampaigns((cs as Campaign[]) ?? []);
