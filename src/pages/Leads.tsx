@@ -61,7 +61,10 @@ const Leads = () => {
   const [params, setParams] = useSearchParams();
   const campaignFilter = params.get("campaign");
 
+  const PAGE_SIZE = 200;
   const [leads, setLeads] = useState<LeadDetail[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [region, setRegion] = useState("Nigeria");
   const [open, setOpen] = useState(false);
@@ -88,35 +91,48 @@ const Leads = () => {
   useEffect(() => { localStorage.setItem("leads:view", view); }, [view]);
   useEffect(() => { localStorage.setItem("leads:tab", tab); }, [tab]);
 
+  const buildLeadsQuery = () => {
+    let q = supabase.from("leads").select("*", { count: "exact" });
+    if (campaignFilter === RAW_VALUE) q = q.is("campaign_id", null);
+    else if (campaignFilter) q = q.eq("campaign_id", campaignFilter);
+    return q.order("score", { ascending: false }).order("created_at", { ascending: false });
+  };
+
   const load = async () => {
     if (!user) return;
-    let leadsQuery = supabase.from("leads").select("*");
-    if (campaignFilter === RAW_VALUE) leadsQuery = leadsQuery.is("campaign_id", null);
-    else if (campaignFilter) leadsQuery = leadsQuery.eq("campaign_id", campaignFilter);
     const [{ data: cs }, leadsRes, { data: prof }] = await Promise.all([
       supabase.from("campaigns").select("id,name").order("name"),
-      leadsQuery
-        .order("score", { ascending: false })
-        .order("created_at", { ascending: false })
-        .range(0, 9999),
+      buildLeadsQuery().range(0, PAGE_SIZE - 1),
       supabase.from("profiles").select("outreach_region").eq("user_id", user.id).maybeSingle(),
     ]);
     setCampaigns((cs as Campaign[]) ?? []);
     setLeads((leadsRes.data as LeadDetail[]) ?? []);
+    setTotalCount(leadsRes.count ?? 0);
     if (prof) setRegion((prof as any).outreach_region || "Nigeria");
+  };
+
+  const loadMore = async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    const from = leads.length;
+    const to = from + PAGE_SIZE - 1;
+    const { data, count } = await buildLeadsQuery().range(from, to);
+    if (data) setLeads((prev) => [...prev, ...(data as LeadDetail[])]);
+    if (typeof count === "number") setTotalCount(count);
+    setLoadingMore(false);
   };
 
   useEffect(() => { if (user) load(); }, [user?.id, campaignFilter]);
 
   const counters = useMemo(() => {
-    const total = leads.length;
+    const total = totalCount || leads.length;
     const hot = leads.filter((l) => (l.score ?? 0) >= 70).length;
     const ready = leads.filter((l) => l.contact_email && !["sent", "opened", "replied", "won", "lost"].includes(l.status)).length;
     const needs = leads.filter((l) => !l.contact_email && !l.phone).length;
     const raw = leads.filter((l) => !l.campaign_id).length;
     const needEnrich = leads.filter(needsEnrichment).length;
     return { total, hot, ready, needs, raw, needEnrich };
-  }, [leads]);
+  }, [leads, totalCount]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
