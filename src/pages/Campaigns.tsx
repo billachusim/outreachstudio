@@ -22,7 +22,9 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Megaphone, Rocket } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Plus, Megaphone, Rocket, Trash2, RotateCcw, Archive } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { startOutreach } from "@/lib/startOutreach";
 import { useNavigate } from "react-router-dom";
