@@ -168,9 +168,11 @@ const Intel = () => {
           No intel yet. Click "Scan now" to fetch the latest stories.
         </CardContent></Card>
       ) : (
-        <div className="grid gap-3">
-          {items.map((it) => (
-            <Card key={it.id} className={it.acted_on ? "opacity-60" : ""}>
+        (() => {
+          const active = items.filter((i) => !i.acted_on);
+          const actedOn = items.filter((i) => i.acted_on);
+          const renderCard = (it: IntelItem) => (
+            <Card key={it.id} className={it.acted_on ? "opacity-70" : ""}>
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-3">
                   <CardTitle className="text-base leading-snug">{it.title}</CardTitle>
@@ -224,16 +226,47 @@ const Intel = () => {
                       <DropdownMenuItem onClick={() => draftSocial(it, "instagram")}>For Instagram</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  {!it.acted_on && (
+                  {!it.acted_on ? (
                     <Button size="sm" variant="ghost" onClick={() => markActed(it.id)}>
                       <Check className="h-3.5 w-3.5 mr-1.5" /> Mark acted
                     </Button>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] gap-1">
+                      <Check className="h-2.5 w-2.5" /> Acted on
+                    </Badge>
                   )}
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+          );
+
+          return (
+            <Tabs defaultValue="active" className="space-y-3">
+              <TabsList>
+                <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
+                <TabsTrigger value="acted">Acted on ({actedOn.length})</TabsTrigger>
+              </TabsList>
+              <TabsContent value="active" className="space-y-3 mt-0">
+                {active.length === 0 ? (
+                  <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
+                    All caught up — no active intel. Check the "Acted on" tab or run a new scan.
+                  </CardContent></Card>
+                ) : (
+                  <div className="grid gap-3">{active.map(renderCard)}</div>
+                )}
+              </TabsContent>
+              <TabsContent value="acted" className="space-y-3 mt-0">
+                {actedOn.length === 0 ? (
+                  <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
+                    Nothing acted on yet.
+                  </CardContent></Card>
+                ) : (
+                  <div className="grid gap-3">{actedOn.map(renderCard)}</div>
+                )}
+              </TabsContent>
+            </Tabs>
+          );
+        })()
       )}
 
       <IntelPitchDrawer
