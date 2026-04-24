@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,18 @@ function rootDomain(url: string | null | undefined): string | null {
   }
 }
 
+function applyAutoMapping(hs: string[]): Record<string, Field> {
+  const m: Record<string, Field> = {};
+  const used = new Set<Field>();
+  hs.forEach((h) => {
+    let f = autoMap(h);
+    if (f !== "skip" && used.has(f)) f = "skip";
+    m[h] = f;
+    if (f !== "skip") used.add(f);
+  });
+  return m;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -74,17 +87,58 @@ export const ImportLeadsDialog = ({ open, onOpenChange, campaigns, onImported }:
   const [campaignId, setCampaignId] = useState<string>("");
   const [dedupe, setDedupe] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [activeSheet, setActiveSheet] = useState<string>("");
 
   const reset = () => {
     setFileName(""); setHeaders([]); setRows([]); setMapping({});
     setTarget("raw"); setCampaignId(""); setDedupe(true); setImporting(false);
+    setWorkbook(null); setSheetNames([]); setActiveSheet("");
     if (inputRef.current) inputRef.current.value = "";
   };
 
   const onClose = (v: boolean) => { if (!v) reset(); onOpenChange(v); };
 
+  const loadSheet = (wb: XLSX.WorkBook, sheetName: string) => {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) return;
+    const json = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "", raw: false });
+    // Headers from first row keys, but also use sheet header row in declared order
+    const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false });
+    const headerRow = (aoa[0] ?? []) as unknown[];
+    const hs = headerRow.map((h) => (h ?? "").toString()).filter((h) => h.length > 0);
+    setHeaders(hs);
+    setRows(json);
+    setMapping(applyAutoMapping(hs));
+  };
+
+  const parseExcel = async (file: File) => {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const names = wb.SheetNames;
+    setWorkbook(wb);
+    setSheetNames(names);
+    const first = names[0] ?? "";
+    setActiveSheet(first);
+    if (first) loadSheet(wb, first);
+  };
+
   const handleFile = (file: File) => {
     setFileName(file.name);
+    setWorkbook(null); setSheetNames([]); setActiveSheet("");
+    const name = file.name.toLowerCase();
+    const isExcel = /\.(xlsx|xls)$/i.test(name) ||
+      file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      file.type === "application/vnd.ms-excel";
+
+    if (isExcel) {
+      parseExcel(file).catch((err) =>
+        toast({ title: "Excel parse error", description: err?.message ?? "Could not read file", variant: "destructive" }),
+      );
+      return;
+    }
+
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
@@ -92,18 +146,15 @@ export const ImportLeadsDialog = ({ open, onOpenChange, campaigns, onImported }:
         const hs = results.meta.fields ?? [];
         setHeaders(hs);
         setRows(results.data);
-        const m: Record<string, Field> = {};
-        const used = new Set<Field>();
-        hs.forEach((h) => {
-          let f = autoMap(h);
-          if (f !== "skip" && used.has(f)) f = "skip"; // first wins for unique fields
-          m[h] = f;
-          if (f !== "skip") used.add(f);
-        });
-        setMapping(m);
+        setMapping(applyAutoMapping(hs));
       },
       error: (err) => toast({ title: "CSV parse error", description: err.message, variant: "destructive" }),
     });
+  };
+
+  const handleSheetChange = (sheet: string) => {
+    setActiveSheet(sheet);
+    if (workbook) loadSheet(workbook, sheet);
   };
 
   const businessHeader = useMemo(
@@ -205,7 +256,7 @@ export const ImportLeadsDialog = ({ open, onOpenChange, campaigns, onImported }:
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Import leads from CSV</DialogTitle>
+          <DialogTitle>Import leads from CSV or Excel</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-5">
@@ -214,7 +265,7 @@ export const ImportLeadsDialog = ({ open, onOpenChange, campaigns, onImported }:
             <input
               ref={inputRef}
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               hidden
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
             />
@@ -226,10 +277,23 @@ export const ImportLeadsDialog = ({ open, onOpenChange, campaigns, onImported }:
               {fileName ? (
                 <><FileSpreadsheet className="h-6 w-6 text-primary" /><span className="font-medium text-foreground">{fileName}</span><span className="text-xs">{rows.length} rows · click to change</span></>
               ) : (
-                <><Upload className="h-6 w-6" /><span>Drop file or click to browse</span><span className="text-xs">.csv only</span></>
+                <><Upload className="h-6 w-6" /><span>Drop file or click to browse</span><span className="text-xs">CSV or Excel (.csv, .xlsx, .xls)</span></>
               )}
             </button>
           </div>
+
+          {/* Sheet picker (Excel multi-sheet only) */}
+          {sheetNames.length > 1 && (
+            <div className="space-y-2">
+              <Label>Sheet</Label>
+              <Select value={activeSheet} onValueChange={handleSheetChange}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {sheetNames.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {rows.length > 0 && (
             <>
