@@ -1,42 +1,51 @@
 
 
-## Add Excel (.xlsx/.xls) Import Support to Leads Page
+## Re-map and enrich existing leads from `users.csv`
 
-Extend the existing CSV import dialog to also accept Excel spreadsheet files. The current dialog only supports `.csv` via PapaParse — we'll add a parallel path that uses the `xlsx` (SheetJS) library to parse Excel files into the same row format, so all downstream logic (auto-mapping, preview, dedupe, insert) works unchanged.
+You already have **8,258 leads** in the database from this CSV — they're loading on the Leads page (200 at a time, click "Load more" to see further). The problem is the original import mapped only `nickname → business_name` and `email → contact_email`. The rich columns from the CSV (`whatsapp`, `instagram`, `twitter`, `tiktok`, `userType`, `nickname`, `secretCode`, `gender`, `isPremium`, `influencerStatus`, etc.) were dropped.
 
-### What Changes for the User
-- The "Import leads" dialog now accepts **`.csv`, `.xlsx`, and `.xls`** files.
-- Drop zone copy updates to: "CSV or Excel (.csv, .xlsx, .xls)".
-- For multi-sheet Excel workbooks, a **sheet picker** appears so the user chooses which tab to import (defaults to the first sheet).
-- Everything else (auto-mapping, preview, campaign assignment, dedupe, batched insert) stays identical.
+I'll fix this by re-processing the CSV server-side and updating the existing lead rows in place (no new duplicates).
 
-### Technical Plan
+### What you'll see after the fix
 
-1. **Add dependency**: install `xlsx` (SheetJS community build) for parsing `.xlsx` / `.xls`.
+For each row in `users.csv`, the matching lead (matched by email, case-insensitive) gets updated with:
 
-2. **Modify `src/components/ImportLeadsDialog.tsx`**:
-   - Update file `<input accept>` to `.csv,.xlsx,.xls` plus the corresponding MIME types.
-   - Add a `parseExcel(file)` helper that:
-     - Reads the file as an ArrayBuffer.
-     - Calls `XLSX.read(buf, { type: "array" })`.
-     - Stores `sheetNames` in new state and defaults to the first sheet.
-     - Converts the chosen sheet via `XLSX.utils.sheet_to_json(ws, { defval: "", raw: false })` so dates/numbers come through as readable strings (matching CSV behavior).
-     - Feeds the resulting headers + rows into the existing `setHeaders` / `setRows` / auto-mapping flow.
-   - Branch in `handleFile(file)` on extension/MIME: `.csv` → existing PapaParse path; `.xlsx`/`.xls` → `parseExcel`.
-   - Add new state: `workbook`, `sheetNames`, `activeSheet`. When the user changes `activeSheet`, re-run the sheet→rows conversion and re-run auto-mapping.
-   - Render a **Sheet selector** (`Select`) above the preview, only when `sheetNames.length > 1`.
-   - Update the dropzone label to mention Excel support and show the file icon for either type.
-   - Extend `reset()` to clear the new state.
+| Lead field | CSV source |
+|---|---|
+| `contact_name` | `nickname` (trimmed) when present and different from business_name fallback |
+| `business_name` | keep current — fallback to `nickname` or `email` local-part if blank |
+| `phone` | `whatsapp` (cleaned, e.g. strip spaces; only if it looks like a phone) |
+| `instagram_url` | `instagram` (normalized to `https://instagram.com/<handle>` if a bare handle) |
+| `x_url` | `twitter` (normalized to `https://x.com/<handle>`) |
+| `website` | `tiktok` if a URL, else `https://tiktok.com/@<handle>` (only when no existing website) |
+| `notes` | Multi-line block with: `userType`, `gender`, `isPremium`, `influencerStatus`, `secretCode`, `userId`, `referredBy`, `languagePreference`, `moods`, `egoMessage` (only non-empty fields, prefixed `--- Imported profile ---`) |
 
-3. **No changes needed** to: mapping logic, dedupe logic, insert payload, campaign assignment, or the Leads page itself — the dialog already returns parsed rows in a generic `Record<string, string>[]` shape.
+Rows in the CSV with no email and no existing match are skipped (we can't safely match them otherwise).
 
-### Edge Cases Handled
-- Multi-sheet workbooks → sheet picker, re-parse on switch.
-- Excel cells with numbers/dates → coerced to strings via `raw: false` so the trim/length checks behave like CSV.
-- Empty rows → filtered out by the existing `r.business_name && r.business_name.length > 0` guard.
-- File >20 MB → not applicable; import is client-side, but we'll keep PapaParse behavior (no extra size guard added).
+### How the fix runs
 
-### Files Touched
-- `package.json` (add `xlsx`)
-- `src/components/ImportLeadsDialog.tsx` (parsing branch + sheet picker)
+1. Copy `users.csv` to a working location.
+2. Run a one-off Python script that:
+   - Parses all 9,593 CSV rows.
+   - Pulls all leads for your user from the database (just `id, contact_email, business_name, contact_name, phone, website, instagram_url, x_url, notes`).
+   - Builds an email-keyed map and matches CSV rows.
+   - For each match, computes only the fields that are currently empty/blank, plus an updated `notes` block.
+   - Writes the updates back via `UPDATE` migrations in batches of ~500.
+3. Reports: matched, updated, skipped (no email / no match), and a sample of 5 before/after rows for QA.
+
+### Notes & guardrails
+
+- **Non-destructive**: existing non-null fields are preserved (we only fill gaps), except `notes` where we *append* an "Imported profile" block if the CSV has profile data and the block isn't already present.
+- **No duplicate leads created** — pure update pass.
+- **Phone validation**: `whatsapp` values are kept only if cleaned digits length is 7–15.
+- **Social handles**: bare handles (no `http`) get a normalized URL; URLs are kept as-is.
+- **Encoding**: file is read as UTF-8 with errors replaced, since the CSV contains accents (e.g. "jéssica", "le métronome").
+
+### Files touched
+
+- No app source files. Database-only update via a one-off script + `UPDATE` migrations scoped to `user_id = 3019e20e-...` (your account).
+
+### After it runs
+
+Open the Leads page, switch to the **All** tab, and you'll see `contact_name`, phone, Instagram/X icons, and a richer profile in the lead detail drawer. The total count stays 8,258.
 
