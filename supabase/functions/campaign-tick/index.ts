@@ -544,13 +544,13 @@ Notes: ${lead.notes ?? ""}`;
 
     // STATE: sending — pick one 'drafted' lead with an unsent pitch, send via Resend
     if (run.state === "sending") {
-      // Daily cap check (per user)
+      // Daily cap check (per user) — Resend free tier is 100/day, paid up to 120/day.
       const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
       const { count: sentToday } = await supabase
         .from("pitches").select("id", { count: "exact", head: true })
         .eq("user_id", run.user_id).gte("sent_at", startOfDay.toISOString());
 
-      const GLOBAL_DAILY_CAP = 300;
+      const GLOBAL_DAILY_CAP = 120;
       if ((sentToday ?? 0) >= GLOBAL_DAILY_CAP) {
         await logEvent("info", `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Pausing for today.`);
         await updateRun({ state: "paused" as never, error: `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Resumes tomorrow.` });
@@ -574,11 +574,41 @@ Notes: ${lead.notes ?? ""}`;
         .maybeSingle();
 
       if (!lead) {
-        // Done!
+        // Done sending. Mark run done, and auto-archive the campaign if its
+        // follow-up cycle has fully run out (no scheduled sequences remain).
         await logEvent("done", `Outreach complete for "${campaign.name}". Sent ${run.leads_sent}.`);
         await updateRun({ state: "done" as never });
+
+        const { count: pendingFollowups } = await supabase
+          .from("pitch_sequences").select("id", { count: "exact", head: true })
+          .eq("campaign_id", campaign.id).eq("status", "scheduled");
+        if ((pendingFollowups ?? 0) === 0) {
+          await supabase.from("campaigns").update({ status: "archived" } as never).eq("id", campaign.id);
+          await logEvent("info", `Campaign "${campaign.name}" archived — full follow-up cycle complete.`);
+        }
         return json(200, { ok: true, transition: "sending->done" });
       }
+
+      // Duplicate-recipient guard: if this email has already been sent to in
+      // another active pitch within the last 14 days (the follow-up window),
+      // skip this lead so we don't spam the same person from parallel campaigns.
+      const cutoff = new Date(Date.now() - 14 * 86400000).toISOString();
+      const { data: recent } = await supabase
+        .from("pitches")
+        .select("id, lead_id, leads!inner(contact_email)")
+        .eq("user_id", run.user_id)
+        .eq("leads.contact_email", lead.contact_email)
+        .neq("lead_id", lead.id)
+        .gte("sent_at", cutoff)
+        .limit(1);
+      if (recent && recent.length > 0) {
+        await supabase.from("leads")
+          .update({ status: "skipped_duplicate", last_activity_at: new Date().toISOString() })
+          .eq("id", lead.id);
+        await logEvent("info", `Skipped ${lead.business_name} (${lead.contact_email}) — already emailed in another campaign within 14 days.`, "info", lead.id);
+        return json(200, { ok: true, skippedDuplicate: true });
+      }
+
 
       const { data: pitch } = await supabase
         .from("pitches")

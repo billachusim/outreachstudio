@@ -43,7 +43,11 @@ Deno.serve(async (req) => {
 
     if (!due || due.length === 0) return json(200, { ok: true, processed: 0 });
 
+    // Global daily cap (Resend: 120/day per user)
+    const GLOBAL_DAILY_CAP = 120;
+
     let sent = 0, skipped = 0, failed = 0;
+    const touchedCampaigns = new Set<string>();
 
     for (const seq of due) {
       // Lead status check — skip if replied/won/lost
@@ -64,6 +68,37 @@ Deno.serve(async (req) => {
         skipped++;
         continue;
       }
+      if (lead.campaign_id) touchedCampaigns.add(lead.campaign_id);
+
+      // Per-user daily cap (Resend 120/day)
+      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      const { count: sentToday } = await supabase
+        .from("pitches").select("id", { count: "exact", head: true })
+        .eq("user_id", seq.user_id).gte("sent_at", startOfDay.toISOString());
+      if ((sentToday ?? 0) >= GLOBAL_DAILY_CAP) {
+        // Leave as scheduled — try again tomorrow
+        break;
+      }
+
+      // Duplicate-recipient guard across campaigns (14-day window) — but
+      // allow follow-ups to the same lead (same lead_id is fine).
+      const cutoff = new Date(Date.now() - 14 * 86400000).toISOString();
+      const { data: recent } = await supabase
+        .from("pitches")
+        .select("id, lead_id, leads!inner(contact_email)")
+        .eq("user_id", seq.user_id)
+        .eq("leads.contact_email", lead.contact_email)
+        .neq("lead_id", lead.id)
+        .gte("sent_at", cutoff)
+        .limit(1);
+      if (recent && recent.length > 0) {
+        await supabase.from("pitch_sequences")
+          .update({ status: "skipped", reason: "duplicate recipient in another campaign (14d)" })
+          .eq("id", seq.id);
+        skipped++;
+        continue;
+      }
+
 
       // Load offering + parent pitch for context
       let offering: any = null;
@@ -127,7 +162,22 @@ Deno.serve(async (req) => {
       sent++;
     }
 
-    return json(200, { ok: true, processed: due.length, sent, skipped, failed });
+    // Auto-archive campaigns whose full follow-up cycle has run out.
+    let archived = 0;
+    for (const campaignId of touchedCampaigns) {
+      const { count: pending } = await supabase
+        .from("pitch_sequences").select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaignId).eq("status", "scheduled");
+      if ((pending ?? 0) === 0) {
+        const { data: c } = await supabase.from("campaigns").select("status").eq("id", campaignId).maybeSingle();
+        if (c && c.status !== "archived") {
+          await supabase.from("campaigns").update({ status: "archived" } as never).eq("id", campaignId);
+          archived++;
+        }
+      }
+    }
+
+    return json(200, { ok: true, processed: due.length, sent, skipped, failed, archived });
   } catch (e) {
     console.error("follow-up-tick", e);
     return json(500, { error: e instanceof Error ? e.message : "error" });
