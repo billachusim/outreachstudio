@@ -43,7 +43,11 @@ Deno.serve(async (req) => {
 
     if (!due || due.length === 0) return json(200, { ok: true, processed: 0 });
 
+    // Global daily cap (Resend: 120/day per user)
+    const GLOBAL_DAILY_CAP = 120;
+
     let sent = 0, skipped = 0, failed = 0;
+    const touchedCampaigns = new Set<string>();
 
     for (const seq of due) {
       // Lead status check — skip if replied/won/lost
