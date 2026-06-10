@@ -162,7 +162,22 @@ Deno.serve(async (req) => {
       sent++;
     }
 
-    return json(200, { ok: true, processed: due.length, sent, skipped, failed });
+    // Auto-archive campaigns whose full follow-up cycle has run out.
+    let archived = 0;
+    for (const campaignId of touchedCampaigns) {
+      const { count: pending } = await supabase
+        .from("pitch_sequences").select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaignId).eq("status", "scheduled");
+      if ((pending ?? 0) === 0) {
+        const { data: c } = await supabase.from("campaigns").select("status").eq("id", campaignId).maybeSingle();
+        if (c && c.status !== "archived") {
+          await supabase.from("campaigns").update({ status: "archived" } as never).eq("id", campaignId);
+          archived++;
+        }
+      }
+    }
+
+    return json(200, { ok: true, processed: due.length, sent, skipped, failed, archived });
   } catch (e) {
     console.error("follow-up-tick", e);
     return json(500, { error: e instanceof Error ? e.message : "error" });
