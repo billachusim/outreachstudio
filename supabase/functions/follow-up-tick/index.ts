@@ -68,6 +68,37 @@ Deno.serve(async (req) => {
         skipped++;
         continue;
       }
+      if (lead.campaign_id) touchedCampaigns.add(lead.campaign_id);
+
+      // Per-user daily cap (Resend 120/day)
+      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      const { count: sentToday } = await supabase
+        .from("pitches").select("id", { count: "exact", head: true })
+        .eq("user_id", seq.user_id).gte("sent_at", startOfDay.toISOString());
+      if ((sentToday ?? 0) >= GLOBAL_DAILY_CAP) {
+        // Leave as scheduled — try again tomorrow
+        break;
+      }
+
+      // Duplicate-recipient guard across campaigns (14-day window) — but
+      // allow follow-ups to the same lead (same lead_id is fine).
+      const cutoff = new Date(Date.now() - 14 * 86400000).toISOString();
+      const { data: recent } = await supabase
+        .from("pitches")
+        .select("id, lead_id, leads!inner(contact_email)")
+        .eq("user_id", seq.user_id)
+        .eq("leads.contact_email", lead.contact_email)
+        .neq("lead_id", lead.id)
+        .gte("sent_at", cutoff)
+        .limit(1);
+      if (recent && recent.length > 0) {
+        await supabase.from("pitch_sequences")
+          .update({ status: "skipped", reason: "duplicate recipient in another campaign (14d)" })
+          .eq("id", seq.id);
+        skipped++;
+        continue;
+      }
+
 
       // Load offering + parent pitch for context
       let offering: any = null;
