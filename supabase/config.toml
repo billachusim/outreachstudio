@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.scan-intel]
 verify_jwt = false
+
+[functions.gmail-reply-sync]
+verify_jwt = false
