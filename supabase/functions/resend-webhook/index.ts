@@ -103,6 +103,14 @@ Deno.serve(async (req) => {
     }
     await supabase.from("leads").update(updates).eq("id", pitch.lead_id);
 
+    // Bounces and complaints mean stop sending — cancel any scheduled
+    // follow-ups for this lead so no campaign keeps targeting them.
+    if (event === "bounced" || event === "complained") {
+      await supabase.from("pitch_sequences")
+        .update({ status: "cancelled", reason: `email ${event}` })
+        .eq("lead_id", pitch.lead_id).eq("status", "scheduled");
+    }
+
     // On delivered, schedule follow-ups (if campaign has auto_followup)
     if (event === "delivered") {
       const { data: leadRow } = await supabase
@@ -113,7 +121,6 @@ Deno.serve(async (req) => {
           .select("id, follow_up_days, auto_followup")
           .eq("id", leadRow.campaign_id).maybeSingle();
         if (camp?.auto_followup && Array.isArray(camp.follow_up_days)) {
-          // Avoid duplicates
           const { data: existing } = await supabase
             .from("pitch_sequences").select("step")
             .eq("lead_id", pitch.lead_id).eq("parent_pitch_id", pitch.id);
