@@ -40,6 +40,7 @@ type Run = {
 type Campaign = { id: string; name: string };
 type Event = { id: string; kind: string; message: string; level: string; created_at: string };
 type Briefing = { id: string; briefing_date: string; body: string; metrics: any; read_at: string | null };
+type SyncTick = { id: string; message: string; level: string; created_at: string };
 
 const stateColors: Record<string, string> = {
   queued: "bg-muted text-muted-foreground",
@@ -62,6 +63,7 @@ const Dashboard = () => {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [funnel, setFunnel] = useState({ sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
   const [generating, setGenerating] = useState(false);
+  const [replySync, setReplySync] = useState<SyncTick | null>(null);
 
   useEffect(() => { document.title = "Studio · Outreach Studio"; }, []);
 
@@ -71,13 +73,14 @@ const Dashboard = () => {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes] = await Promise.all([
+    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes, syncRes] = await Promise.all([
       supabase.from("campaign_runs").select("*").order("updated_at", { ascending: false }).limit(20),
       supabase.from("campaigns").select("id,name"),
       supabase.from("run_events").select("*").order("created_at", { ascending: false }).limit(20),
       supabase.from("pitches").select("id", { count: "exact", head: true }).gte("sent_at", start.toISOString()),
       supabase.from("daily_briefings").select("*").order("briefing_date", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("pitch_events").select("event_type").gte("occurred_at", since),
+      supabase.from("run_events").select("id,message,level,created_at").eq("kind", "gmail-reply-sync").order("created_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
 
     setRuns((runsRes.data as Run[]) ?? []);
@@ -87,6 +90,7 @@ const Dashboard = () => {
     setEvents((eventsRes.data as Event[]) ?? []);
     setSentToday(sentRes.count ?? 0);
     setBriefing((briefingRes.data as Briefing) ?? null);
+    setReplySync((syncRes.data as SyncTick) ?? null);
 
     const f = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
     ((eventsFunnelRes.data as { event_type: string }[]) ?? []).forEach((e) => {
