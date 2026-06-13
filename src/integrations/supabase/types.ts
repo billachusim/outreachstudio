@@ -820,6 +820,8 @@ export type Database = {
           created_at: string
           id: string
           lead_id: string
+          message_id_header: string | null
+          provider_message_id: string | null
           sent_at: string | null
           subject: string | null
           updated_at: string
@@ -830,6 +832,8 @@ export type Database = {
           created_at?: string
           id?: string
           lead_id: string
+          message_id_header?: string | null
+          provider_message_id?: string | null
           sent_at?: string | null
           subject?: string | null
           updated_at?: string
@@ -840,6 +844,8 @@ export type Database = {
           created_at?: string
           id?: string
           lead_id?: string
+          message_id_header?: string | null
+          provider_message_id?: string | null
           sent_at?: string | null
           subject?: string | null
           updated_at?: string

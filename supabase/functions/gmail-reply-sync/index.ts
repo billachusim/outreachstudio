@@ -6,6 +6,13 @@
 //     keeps emailing a lead that already replied
 //
 // Designed to be invoked by pg_cron every ~10 minutes. verify_jwt = false.
+//
+// Lead matching, in order:
+//   1. In-Reply-To / References header → pitches.message_id_header → lead_id
+//   2. lower(trim(from)) === lower(trim(leads.contact_email))
+//
+// Accepts ?days=N (default 2) so a one-time backfill can be run via:
+//   POST /functions/v1/gmail-reply-sync?days=90
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -48,7 +55,6 @@ function extractBody(payload: any): string {
   if (!payload) return "";
   if (payload.body?.data) return decodeB64Url(payload.body.data);
   const parts: any[] = payload.parts ?? [];
-  // Prefer text/plain
   for (const p of parts) {
     if (p.mimeType === "text/plain" && p.body?.data) return decodeB64Url(p.body.data);
   }
@@ -57,7 +63,6 @@ function extractBody(payload: any): string {
       return decodeB64Url(p.body.data).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     }
   }
-  // Recurse
   for (const p of parts) {
     const v = extractBody(p);
     if (v) return v;
@@ -65,26 +70,64 @@ function extractBody(payload: any): string {
   return "";
 }
 
+// Extract every <message-id@host> token from In-Reply-To + References.
+function extractMessageIdRefs(headerValues: string[]): string[] {
+  const out: string[] = [];
+  for (const v of headerValues) {
+    if (!v) continue;
+    const matches = v.match(/<[^<>\s]+>/g);
+    if (matches) for (const m of matches) out.push(m);
+  }
+  return Array.from(new Set(out));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const startedAt = Date.now();
   try {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    // Query Gmail for recent inbox messages (last 2 days, excluding self)
-    const q = encodeURIComponent("newer_than:2d in:inbox -from:me -category:promotions -category:social");
-    const listRes = await fetch(`${GATEWAY}/users/me/messages?maxResults=50&q=${q}`, { headers: gmailHeaders() });
-    if (!listRes.ok) {
-      const txt = await listRes.text();
-      return json(502, { error: `gmail list ${listRes.status}`, body: txt.slice(0, 500) });
+    // Parse days from URL or body
+    let days = 2;
+    let maxResults = 50;
+    try {
+      const url = new URL(req.url);
+      const d = parseInt(url.searchParams.get("days") ?? "");
+      if (d > 0 && d <= 365) days = d;
+      const m = parseInt(url.searchParams.get("maxResults") ?? "");
+      if (m > 0 && m <= 500) maxResults = m;
+    } catch {}
+    if (req.method === "POST") {
+      try {
+        const b = await req.json();
+        if (b?.days && b.days > 0 && b.days <= 365) days = b.days;
+        if (b?.maxResults && b.maxResults > 0 && b.maxResults <= 500) maxResults = b.maxResults;
+      } catch {}
     }
-    const listJson = await listRes.json();
-    const ids: string[] = (listJson.messages ?? []).map((m: any) => m.id);
 
-    let matched = 0, skipped = 0, errors = 0;
+    // Page through results when backfilling.
+    const q = encodeURIComponent(`newer_than:${days}d in:inbox -from:me -category:promotions -category:social`);
+    const ids: string[] = [];
+    let pageToken: string | undefined;
+    const hardCap = days > 7 ? 1000 : 100;
+    do {
+      const url = `${GATEWAY}/users/me/messages?maxResults=${maxResults}&q=${q}${pageToken ? `&pageToken=${pageToken}` : ""}`;
+      const listRes = await fetch(url, { headers: gmailHeaders() });
+      if (!listRes.ok) {
+        const txt = await listRes.text();
+        await logRun(supabase, "error", `gmail list ${listRes.status}: ${txt.slice(0, 300)}`);
+        return json(502, { error: `gmail list ${listRes.status}`, body: txt.slice(0, 500) });
+      }
+      const listJson = await listRes.json();
+      for (const m of (listJson.messages ?? [])) ids.push(m.id);
+      pageToken = listJson.nextPageToken;
+      if (ids.length >= hardCap) break;
+    } while (pageToken);
+
+    let matched = 0, skipped = 0, errors = 0, matchedByHeader = 0, matchedByEmail = 0;
 
     for (const id of ids) {
       try {
-        // Dedupe early
         const { data: existing } = await supabase
           .from("channel_messages").select("id").eq("provider_message_id", id).maybeSingle();
         if (existing) { skipped++; continue; }
@@ -97,18 +140,43 @@ Deno.serve(async (req) => {
         const fromAddr = extractEmail(h("From"));
         const subject = h("Subject");
         const toAddr = h("To");
+        const inReplyTo = h("In-Reply-To");
+        const references = h("References");
         const body = extractBody(m.payload).slice(0, 20000);
         if (!fromAddr) { skipped++; continue; }
 
-        // Match a lead by contact_email
-        const { data: lead } = await supabase
-          .from("leads")
-          .select("id, user_id, campaign_id")
-          .ilike("contact_email", fromAddr)
-          .limit(1).maybeSingle();
+        // Try header-based threading first
+        let lead: { id: string; user_id: string; campaign_id: string | null } | null = null;
+        const refs = extractMessageIdRefs([inReplyTo, references]);
+        if (refs.length) {
+          const { data: pitchMatch } = await supabase
+            .from("pitches")
+            .select("lead_id, user_id, leads:lead_id(id, user_id, campaign_id)")
+            .in("message_id_header", refs)
+            .limit(1).maybeSingle();
+          const l = (pitchMatch as any)?.leads;
+          if (l) {
+            lead = { id: l.id, user_id: l.user_id, campaign_id: l.campaign_id };
+            matchedByHeader++;
+          }
+        }
+
+        // Fallback: match on from address
+        if (!lead) {
+          const cleanFrom = fromAddr.trim().toLowerCase();
+          const { data: leadRow } = await supabase
+            .from("leads")
+            .select("id, user_id, campaign_id")
+            .ilike("contact_email", cleanFrom)
+            .limit(1).maybeSingle();
+          if (leadRow) {
+            lead = leadRow as any;
+            matchedByEmail++;
+          }
+        }
+
         if (!lead) { skipped++; continue; }
 
-        // Insert inbound message
         const { data: inserted } = await supabase.from("channel_messages").insert({
           user_id: lead.user_id,
           lead_id: lead.id,
@@ -121,15 +189,13 @@ Deno.serve(async (req) => {
           body,
           provider_message_id: id,
           status: "received",
-          payload: { source: "gmail-reply-sync", snippet: m.snippet ?? "" },
+          payload: { source: "gmail-reply-sync", snippet: m.snippet ?? "", in_reply_to: inReplyTo, references },
         }).select("id").maybeSingle();
 
-        // Cancel any remaining scheduled follow-ups for this lead
         await supabase.from("pitch_sequences")
           .update({ status: "cancelled", reason: "lead replied via email" })
           .eq("lead_id", lead.id).eq("status", "scheduled");
 
-        // Mark replied + classify
         await supabase.from("leads")
           .update({ status: "replied", last_activity_at: new Date().toISOString() })
           .eq("id", lead.id);
@@ -138,10 +204,9 @@ Deno.serve(async (req) => {
           user_id: lead.user_id, lead_id: lead.id,
           event_type: "replied", channel: "email", provider: "gmail",
           provider_message_id: id, recipient: toAddr,
-          payload: { from: fromAddr, subject },
+          payload: { from: fromAddr, subject, matched_via: refs.length ? "header" : "email" },
         });
 
-        // Best-effort intent classification
         if (inserted?.id) {
           fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/classify-reply`, {
             method: "POST",
@@ -157,9 +222,33 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json(200, { ok: true, scanned: ids.length, matched, skipped, errors });
+    const result = { ok: true, days, scanned: ids.length, matched, matchedByHeader, matchedByEmail, skipped, errors, durationMs: Date.now() - startedAt };
+    await logRun(
+      supabase,
+      errors > 0 ? "warn" : "info",
+      `gmail-reply-sync: scanned ${ids.length}, matched ${matched} (${matchedByHeader} hdr / ${matchedByEmail} email), skipped ${skipped}, errors ${errors} (${days}d)`,
+    );
+    return json(200, result);
   } catch (e) {
     console.error("gmail-reply-sync error", e);
     return json(500, { error: e instanceof Error ? e.message : "error" });
   }
 });
+
+// Log a row per tick so the Dashboard can show health.
+async function logRun(supabase: any, level: "info" | "warn" | "error", message: string) {
+  try {
+    // We need a user_id; pick the workspace owner (first user with leads).
+    const { data: anyLead } = await supabase
+      .from("leads").select("user_id").not("user_id", "is", null).limit(1).maybeSingle();
+    if (!anyLead?.user_id) return;
+    await supabase.from("run_events").insert({
+      user_id: anyLead.user_id,
+      kind: "gmail-reply-sync",
+      level,
+      message,
+    });
+  } catch (e) {
+    console.warn("logRun failed", e);
+  }
+}

@@ -132,10 +132,11 @@ Deno.serve(async (req) => {
       if (!argsStr) { failed++; continue; }
       const { subject, body } = JSON.parse(argsStr);
 
-      // Save draft as a pitch row
+      // Save draft as a pitch row with a deterministic Message-ID
       const { data: newPitch } = await supabase.from("pitches").insert({
         user_id: seq.user_id, lead_id: seq.lead_id, subject, body,
       }).select("id").single();
+      const messageIdHeader = newPitch ? `<pitch-${newPitch.id}@techfaculty.ng>` : undefined;
 
       // Send
       const sendRes = await fetch(`${RESEND_GATEWAY}/emails`, {
@@ -148,6 +149,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           from: FROM, to: [lead.contact_email], reply_to: REPLY_TO,
           subject: `Re: ${subject}`, html: bodyToHtml(body), text: body,
+          ...(messageIdHeader ? { headers: { "Message-ID": messageIdHeader } } : {}),
         }),
       });
       if (!sendRes.ok) {
@@ -156,7 +158,12 @@ Deno.serve(async (req) => {
         continue;
       }
       const now = new Date().toISOString();
-      await supabase.from("pitches").update({ sent_at: now }).eq("id", newPitch!.id);
+      const sendBody = await sendRes.json().catch(() => ({}));
+      await supabase.from("pitches").update({
+        sent_at: now,
+        provider_message_id: (sendBody as any)?.id ?? null,
+        message_id_header: messageIdHeader ?? null,
+      } as never).eq("id", newPitch!.id);
       await supabase.from("pitch_sequences").update({ status: "sent", pitch_id: newPitch?.id, sent_at: now }).eq("id", seq.id);
       await supabase.from("leads").update({ last_activity_at: now }).eq("id", lead.id);
       sent++;

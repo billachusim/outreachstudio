@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Pause, Play, Activity, Send, Sparkles, Sun, RefreshCw, Eye, MailOpen, Reply, AlertTriangle, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import { TopTriggersWidget } from "@/components/TopTriggersWidget";
 import { FetchLeadsProgress } from "@/components/FetchLeadsProgress";
 import {
@@ -40,6 +41,7 @@ type Run = {
 type Campaign = { id: string; name: string };
 type Event = { id: string; kind: string; message: string; level: string; created_at: string };
 type Briefing = { id: string; briefing_date: string; body: string; metrics: any; read_at: string | null };
+type SyncTick = { id: string; message: string; level: string; created_at: string };
 
 const stateColors: Record<string, string> = {
   queued: "bg-muted text-muted-foreground",
@@ -62,6 +64,7 @@ const Dashboard = () => {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [funnel, setFunnel] = useState({ sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
   const [generating, setGenerating] = useState(false);
+  const [replySync, setReplySync] = useState<SyncTick | null>(null);
 
   useEffect(() => { document.title = "Studio · Outreach Studio"; }, []);
 
@@ -71,13 +74,14 @@ const Dashboard = () => {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes] = await Promise.all([
+    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes, syncRes] = await Promise.all([
       supabase.from("campaign_runs").select("*").order("updated_at", { ascending: false }).limit(20),
       supabase.from("campaigns").select("id,name"),
       supabase.from("run_events").select("*").order("created_at", { ascending: false }).limit(20),
       supabase.from("pitches").select("id", { count: "exact", head: true }).gte("sent_at", start.toISOString()),
       supabase.from("daily_briefings").select("*").order("briefing_date", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("pitch_events").select("event_type").gte("occurred_at", since),
+      supabase.from("run_events").select("id,message,level,created_at").eq("kind", "gmail-reply-sync").order("created_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
 
     setRuns((runsRes.data as Run[]) ?? []);
@@ -87,6 +91,7 @@ const Dashboard = () => {
     setEvents((eventsRes.data as Event[]) ?? []);
     setSentToday(sentRes.count ?? 0);
     setBriefing((briefingRes.data as Briefing) ?? null);
+    setReplySync((syncRes.data as SyncTick) ?? null);
 
     const f = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
     ((eventsFunnelRes.data as { event_type: string }[]) ?? []).forEach((e) => {
@@ -201,6 +206,28 @@ const Dashboard = () => {
       </Card>
 
       <TopTriggersWidget />
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2"><Reply className="h-4 w-4" /> Reply sync</CardTitle>
+          {replySync && (
+            <Badge variant="outline" className={cn(
+              "text-[10px]",
+              replySync.level === "error" && "border-destructive text-destructive",
+              replySync.level === "warn" && "border-amber-500 text-amber-600",
+            )}>
+              {new Date(replySync.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {Math.round((Date.now() - +new Date(replySync.created_at)) / 60000)}m ago
+            </Badge>
+          )}
+        </CardHeader>
+        <CardContent>
+          {replySync ? (
+            <p className="text-sm text-muted-foreground">{replySync.message}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No reply-sync ticks yet. Runs every 10 minutes.</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">7-day funnel</CardTitle></CardHeader>
