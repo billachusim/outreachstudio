@@ -207,6 +207,28 @@ const Dashboard = () => {
       <TopTriggersWidget />
 
       <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2"><Reply className="h-4 w-4" /> Reply sync</CardTitle>
+          {replySync && (
+            <Badge variant="outline" className={cn(
+              "text-[10px]",
+              replySync.level === "error" && "border-destructive text-destructive",
+              replySync.level === "warn" && "border-amber-500 text-amber-600",
+            )}>
+              {new Date(replySync.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {Math.round((Date.now() - +new Date(replySync.created_at)) / 60000)}m ago
+            </Badge>
+          )}
+        </CardHeader>
+        <CardContent>
+          {replySync ? (
+            <p className="text-sm text-muted-foreground">{replySync.message}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No reply-sync ticks yet. Runs every 10 minutes.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle className="text-base">7-day funnel</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
