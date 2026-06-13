@@ -1,6 +1,7 @@
 // Sends a saved pitch via Resend (through Lovable connector gateway).
 // Stamps pitches.sent_at, sets lead.status = 'sent'.
-// Enforces a per-user daily send cap.
+// Captures Resend provider id + RFC822 Message-ID header so Gmail replies
+// can later be threaded back to the exact pitch.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -15,6 +16,7 @@ const DEFAULT_DAILY_CAP = 120;
 // Verified domain: techfaculty.ng (Resend)
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
 const REPLY_TO = "thetechfaculty@gmail.com";
+const SENDING_DOMAIN = "techfaculty.ng";
 
 interface Body {
   pitchId: string;
@@ -28,7 +30,6 @@ const json = (status: number, payload: unknown) =>
   });
 
 function bodyToHtml(text: string): string {
-  // Minimal escaping + line breaks
   const esc = text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -37,6 +38,12 @@ function bodyToHtml(text: string): string {
     .split(/\n{2,}/)
     .map((p) => `<p style="margin:0 0 14px;line-height:1.5">${p.replace(/\n/g, "<br/>")}</p>`)
     .join("");
+}
+
+// Build a deterministic Message-ID header so replies (which echo it in
+// In-Reply-To / References) can be matched back to this exact pitch.
+function buildMessageId(pitchId: string): string {
+  return `<pitch-${pitchId}@${SENDING_DOMAIN}>`;
 }
 
 Deno.serve(async (req) => {
@@ -63,7 +70,6 @@ Deno.serve(async (req) => {
     const { pitchId, dailyCap = DEFAULT_DAILY_CAP } = (await req.json()) as Body;
     if (!pitchId) return json(400, { error: "pitchId required" });
 
-    // Daily cap check
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const { count: sentToday } = await supabase
@@ -80,7 +86,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Load pitch + lead
     const { data: pitch, error: perr } = await supabase
       .from("pitches")
       .select("id, subject, body, sent_at, lead_id")
@@ -102,7 +107,7 @@ Deno.serve(async (req) => {
       return json(400, { error: `${lead.business_name} has no contact email` });
     }
 
-    // Send via Resend gateway
+    const messageIdHeader = buildMessageId(pitch.id);
     const sendRes = await fetch(`${GATEWAY_URL}/emails`, {
       method: "POST",
       headers: {
@@ -117,6 +122,7 @@ Deno.serve(async (req) => {
         subject: pitch.subject,
         html: bodyToHtml(pitch.body),
         text: pitch.body,
+        headers: { "Message-ID": messageIdHeader },
       }),
     });
 
@@ -129,7 +135,12 @@ Deno.serve(async (req) => {
     }
 
     const sentAt = new Date().toISOString();
-    await supabase.from("pitches").update({ sent_at: sentAt }).eq("id", pitch.id);
+    const providerId = sendJson?.id ?? null;
+    await supabase.from("pitches").update({
+      sent_at: sentAt,
+      provider_message_id: providerId,
+      message_id_header: messageIdHeader,
+    } as never).eq("id", pitch.id);
     await supabase.from("leads").update({ status: "sent" }).eq("id", lead.id);
 
     return json(200, {
@@ -137,7 +148,7 @@ Deno.serve(async (req) => {
       pitchId: pitch.id,
       to: lead.contact_email,
       sentAt,
-      providerId: sendJson?.id ?? null,
+      providerId,
     });
   } catch (e) {
     console.error("send-pitch error", e);
