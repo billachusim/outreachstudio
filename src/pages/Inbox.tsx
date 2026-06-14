@@ -316,25 +316,6 @@ Return only the reply body — no preamble.` },
                 </li>
                 );
               })}
-                        </div>
-                      </div>
-                      {t.unreadCount > 0 && (
-                        <Badge className="bg-primary text-primary-foreground">{t.unreadCount}</Badge>
-                      )}
-                    </div>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      {t.lead?.reply_intent && (
-                        <Badge className={cn("text-[10px]", intentColors[t.lead.reply_intent] ?? "bg-muted")}>
-                          {t.lead.reply_intent}
-                        </Badge>
-                      )}
-                      <span className="text-[10px] text-muted-foreground">
-                        {new Date(t.lastAt).toLocaleDateString()} · {new Date(t.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    </div>
-                  </button>
-                </li>
-              ))}
             </ul>
           </Card>
 
