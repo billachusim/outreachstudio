@@ -116,6 +116,7 @@ const eventLabel: Record<string, string> = {
 
 const Inbox = () => {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [threads, setThreads] = useState<Thread[]>([]);
