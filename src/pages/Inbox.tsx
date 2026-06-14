@@ -37,6 +37,72 @@ const intentColors: Record<string, string> = {
   "out-of-office": "bg-amber-500/15 text-amber-600",
 };
 
+type NextAction = {
+  label: string;
+  tone: "urgent" | "warm" | "neutral" | "cold" | "stop";
+  hint: string;
+};
+
+const actionStyles: Record<NextAction["tone"], string> = {
+  urgent: "bg-destructive/15 text-destructive border-destructive/30",
+  warm: "bg-success/15 text-success border-success/30",
+  neutral: "bg-primary/10 text-primary border-primary/30",
+  cold: "bg-muted text-muted-foreground border-border",
+  stop: "bg-destructive/10 text-destructive border-destructive/30",
+};
+
+function daysSince(iso: string | null | undefined): number {
+  if (!iso) return Infinity;
+  return Math.floor((Date.now() - +new Date(iso)) / 86_400_000);
+}
+
+function computeNextAction(t: Thread): NextAction {
+  const intent = t.lead?.reply_intent ?? null;
+  const status = t.lead?.status ?? null;
+  const lastInbound = [...t.items].reverse().find(
+    (i) => (i.kind === "event" && i.data.event_type === "replied") || (i.kind === "msg" && i.data.direction === "inbound"),
+  );
+  const lastOutbound = [...t.items].reverse().find(
+    (i) => i.kind === "pitch" || (i.kind === "msg" && i.data.direction === "outbound"),
+  );
+  const inboundAge = daysSince(lastInbound?.at ?? null);
+  const outboundAge = daysSince(lastOutbound?.at ?? null);
+  const awaitingOurReply = lastInbound && (!lastOutbound || +new Date(lastInbound.at) > +new Date(lastOutbound.at));
+
+  if (intent === "unsubscribe" || status === "unsubscribed") {
+    return { label: "Do not contact", tone: "stop", hint: "Lead asked to unsubscribe." };
+  }
+  if (intent === "not_interested" || status === "lost") {
+    return { label: "Mark lost", tone: "stop", hint: "Lead is not interested." };
+  }
+  if (awaitingOurReply && (intent === "interested" || intent === "question")) {
+    return {
+      label: inboundAge >= 1 ? "Reply now — overdue" : "Reply now",
+      tone: "urgent",
+      hint: `Lead replied ${inboundAge === 0 ? "today" : `${inboundAge}d ago`} (${intent}).`,
+    };
+  }
+  if (awaitingOurReply && intent === "out_of_office") {
+    return { label: "Snooze 7d", tone: "neutral", hint: "Out of office — follow up next week." };
+  }
+  if (awaitingOurReply && intent === "auto_reply") {
+    return { label: "Wait", tone: "cold", hint: "Auto-reply received, no action needed." };
+  }
+  if (awaitingOurReply) {
+    return { label: "Reply now", tone: "warm", hint: "Lead replied — draft a response." };
+  }
+  if (!t.hasReply && outboundAge >= 14) {
+    return { label: "Close out", tone: "cold", hint: "No reply after 14 days." };
+  }
+  if (!t.hasReply && outboundAge >= 3) {
+    return { label: "Follow-up due", tone: "neutral", hint: `Last touch ${outboundAge}d ago.` };
+  }
+  if (!t.hasReply) {
+    return { label: "Wait", tone: "cold", hint: "Sequence still running." };
+  }
+  return { label: "Nurture", tone: "neutral", hint: "Keep the conversation warm." };
+}
+
 const eventLabel: Record<string, string> = {
   delivered: "Delivered",
   opened: "Opened",
@@ -211,7 +277,9 @@ Return only the reply body — no preamble.` },
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
           <Card className="max-h-[75vh] overflow-y-auto">
             <ul className="divide-y">
-              {filtered.map((t) => (
+              {filtered.map((t) => {
+                const action = computeNextAction(t);
+                return (
                 <li key={t.leadId}>
                   <button
                     onClick={() => setActiveId(t.leadId)}
@@ -231,19 +299,23 @@ Return only the reply body — no preamble.` },
                         <Badge className="bg-primary text-primary-foreground">{t.unreadCount}</Badge>
                       )}
                     </div>
-                    <div className="mt-1 flex items-center gap-1.5">
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className={cn("text-[10px]", actionStyles[action.tone])}>
+                        {action.label}
+                      </Badge>
                       {t.lead?.reply_intent && (
                         <Badge className={cn("text-[10px]", intentColors[t.lead.reply_intent] ?? "bg-muted")}>
                           {t.lead.reply_intent}
                         </Badge>
                       )}
                       <span className="text-[10px] text-muted-foreground">
-                        {new Date(t.lastAt).toLocaleDateString()} · {new Date(t.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {new Date(t.lastAt).toLocaleDateString()}
                       </span>
                     </div>
                   </button>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </Card>
 
@@ -274,6 +346,15 @@ Return only the reply body — no preamble.` },
                     )}
                   </div>
                 </div>
+                {(() => {
+                  const action = computeNextAction(active);
+                  return (
+                    <div className={cn("flex items-center justify-between gap-3 border-b px-4 py-2 text-xs", actionStyles[action.tone])}>
+                      <span className="font-medium">Next: {action.label}</span>
+                      <span className="opacity-80">{action.hint}</span>
+                    </div>
+                  );
+                })()}
 
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {active.items.map((it, idx) => {
