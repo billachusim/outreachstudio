@@ -277,7 +277,9 @@ Return only the reply body — no preamble.` },
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
           <Card className="max-h-[75vh] overflow-y-auto">
             <ul className="divide-y">
-              {filtered.map((t) => (
+              {filtered.map((t) => {
+                const action = computeNextAction(t);
+                return (
                 <li key={t.leadId}>
                   <button
                     onClick={() => setActiveId(t.leadId)}
@@ -291,6 +293,29 @@ Return only the reply body — no preamble.` },
                         <div className="truncate font-medium">{t.lead?.business_name ?? "(deleted lead)"}</div>
                         <div className="truncate text-xs text-muted-foreground">
                           {t.lead?.contact_email ?? t.lead?.phone ?? "—"}
+                        </div>
+                      </div>
+                      {t.unreadCount > 0 && (
+                        <Badge className="bg-primary text-primary-foreground">{t.unreadCount}</Badge>
+                      )}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className={cn("text-[10px]", actionStyles[action.tone])}>
+                        {action.label}
+                      </Badge>
+                      {t.lead?.reply_intent && (
+                        <Badge className={cn("text-[10px]", intentColors[t.lead.reply_intent] ?? "bg-muted")}>
+                          {t.lead.reply_intent}
+                        </Badge>
+                      )}
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(t.lastAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </button>
+                </li>
+                );
+              })}
                         </div>
                       </div>
                       {t.unreadCount > 0 && (
