@@ -6,9 +6,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Inbox as InboxIcon, Mail, Loader2, MessageCircle, Sparkles, Send, ExternalLink } from "lucide-react";
+import { Inbox as InboxIcon, Mail, Loader2, MessageCircle, Sparkles, Send, ExternalLink, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type Lead = { id: string; business_name: string; contact_email: string | null; phone: string | null; status: string; reply_intent: string | null; score: number | null; last_activity_at: string | null };
 type Pitch = { id: string; subject: string | null; body: string | null; sent_at: string | null; lead_id: string };
