@@ -164,7 +164,7 @@ const Inbox = () => {
     });
     out.sort((a, b) => +new Date(b.lastAt) - +new Date(a.lastAt));
     setThreads(out);
-    if (!activeId && out.length) setActiveId(out[0].leadId);
+    if (!activeId && out.length && !isMobile) setActiveId(out[0].leadId);
     setLoading(false);
   };
 
