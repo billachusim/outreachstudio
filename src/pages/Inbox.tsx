@@ -322,12 +322,17 @@ Return only the reply body — no preamble.` },
             </ul>
           </Card>
 
-          <Card className="flex max-h-[75vh] flex-col">
+          <Card className={cn("flex flex-col", isMobile ? "h-[calc(100vh-9rem)]" : "max-h-[75vh]", isMobile && !active && "hidden")}>
             {!active ? (
               <CardContent className="flex flex-1 items-center justify-center text-muted-foreground">Select a thread</CardContent>
             ) : (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
+                  {isMobile && (
+                    <Button variant="ghost" size="sm" className="-ml-2 mr-1 h-8 px-2" onClick={() => setActiveId(null)}>
+                      <ArrowLeft className="h-4 w-4" /> Back
+                    </Button>
+                  )}
                   <div>
                     <div className="font-semibold">
                       {active.lead?.business_name ?? "(deleted)"}{" "}
