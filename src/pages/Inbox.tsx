@@ -346,6 +346,15 @@ Return only the reply body — no preamble.` },
                     )}
                   </div>
                 </div>
+                {(() => {
+                  const action = computeNextAction(active);
+                  return (
+                    <div className={cn("flex items-center justify-between gap-3 border-b px-4 py-2 text-xs", actionStyles[action.tone])}>
+                      <span className="font-medium">Next: {action.label}</span>
+                      <span className="opacity-80">{action.hint}</span>
+                    </div>
+                  );
+                })()}
 
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {active.items.map((it, idx) => {
