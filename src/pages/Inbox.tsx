@@ -277,7 +277,8 @@ Return only the reply body — no preamble.` },
         </Card>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-          <Card className="max-h-[75vh] overflow-y-auto">
+          <Card className={cn("max-h-[75vh] overflow-y-auto", isMobile && active && "hidden")}>
+
             <ul className="divide-y">
               {filtered.map((t) => {
                 const action = computeNextAction(t);
