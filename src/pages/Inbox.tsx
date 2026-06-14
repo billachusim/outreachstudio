@@ -6,9 +6,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Inbox as InboxIcon, Mail, Loader2, MessageCircle, Sparkles, Send, ExternalLink } from "lucide-react";
+import { Inbox as InboxIcon, Mail, Loader2, MessageCircle, Sparkles, Send, ExternalLink, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type Lead = { id: string; business_name: string; contact_email: string | null; phone: string | null; status: string; reply_intent: string | null; score: number | null; last_activity_at: string | null };
 type Pitch = { id: string; subject: string | null; body: string | null; sent_at: string | null; lead_id: string };
@@ -115,6 +116,7 @@ const eventLabel: Record<string, string> = {
 
 const Inbox = () => {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -162,7 +164,7 @@ const Inbox = () => {
     });
     out.sort((a, b) => +new Date(b.lastAt) - +new Date(a.lastAt));
     setThreads(out);
-    if (!activeId && out.length) setActiveId(out[0].leadId);
+    if (!activeId && out.length && !isMobile) setActiveId(out[0].leadId);
     setLoading(false);
   };
 
@@ -275,7 +277,8 @@ Return only the reply body — no preamble.` },
         </Card>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-          <Card className="max-h-[75vh] overflow-y-auto">
+          <Card className={cn("max-h-[75vh] overflow-y-auto", isMobile && active && "hidden")}>
+
             <ul className="divide-y">
               {filtered.map((t) => {
                 const action = computeNextAction(t);
@@ -319,12 +322,17 @@ Return only the reply body — no preamble.` },
             </ul>
           </Card>
 
-          <Card className="flex max-h-[75vh] flex-col">
+          <Card className={cn("flex flex-col", isMobile ? "h-[calc(100vh-9rem)]" : "max-h-[75vh]", isMobile && !active && "hidden")}>
             {!active ? (
               <CardContent className="flex flex-1 items-center justify-center text-muted-foreground">Select a thread</CardContent>
             ) : (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
+                  {isMobile && (
+                    <Button variant="ghost" size="sm" className="-ml-2 mr-1 h-8 px-2" onClick={() => setActiveId(null)}>
+                      <ArrowLeft className="h-4 w-4" /> Back
+                    </Button>
+                  )}
                   <div>
                     <div className="font-semibold">
                       {active.lead?.business_name ?? "(deleted)"}{" "}
