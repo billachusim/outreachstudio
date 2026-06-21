@@ -98,6 +98,36 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // Per-lead cooldown: never send to the same lead twice within 24h.
+      const cooldownStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count: recentToLead } = await supabase
+        .from("pitches").select("id", { count: "exact", head: true })
+        .eq("lead_id", lead.id)
+        .gte("sent_at", cooldownStart);
+      if ((recentToLead ?? 0) > 0) {
+        await supabase.from("pitch_sequences")
+          .update({ status: "skipped", reason: "lead cooldown (<24h since last send)" })
+          .eq("id", seq.id);
+        skipped++;
+        continue;
+      }
+
+      // Hard cap: at most 3 follow-ups sent per lead per campaign, total.
+      if (lead.campaign_id) {
+        const { count: sentFollowups } = await supabase
+          .from("pitch_sequences").select("id", { count: "exact", head: true })
+          .eq("lead_id", lead.id)
+          .eq("campaign_id", lead.campaign_id)
+          .eq("status", "sent");
+        if ((sentFollowups ?? 0) >= 3) {
+          await supabase.from("pitch_sequences")
+            .update({ status: "cancelled", reason: "max follow-ups (3) reached" })
+            .eq("lead_id", lead.id).eq("campaign_id", lead.campaign_id).eq("status", "scheduled");
+          skipped++;
+          continue;
+        }
+      }
+
 
       // Load offering + parent pitch for context
       let offering: any = null;

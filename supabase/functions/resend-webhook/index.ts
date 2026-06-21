@@ -111,33 +111,55 @@ Deno.serve(async (req) => {
         .eq("lead_id", pitch.lead_id).eq("status", "scheduled");
     }
 
-    // On delivered, schedule follow-ups (if campaign has auto_followup)
+    // On delivered, schedule follow-ups (if campaign has auto_followup).
+    // Guard against the historical bug where every follow-up's delivery
+    // would itself spawn a new 3-step chain (1 → 3 → 9 → 27…). We only
+    // ever schedule follow-ups when:
+    //   a) the delivered pitch is NOT itself a follow-up, AND
+    //   b) the lead has no other sequences yet (scheduled OR sent) for this campaign.
     if (event === "delivered") {
       const { data: leadRow } = await supabase
         .from("leads").select("id, campaign_id").eq("id", pitch.lead_id).maybeSingle();
       if (leadRow?.campaign_id) {
-        const { data: camp } = await supabase
-          .from("campaigns")
-          .select("id, follow_up_days, auto_followup")
-          .eq("id", leadRow.campaign_id).maybeSingle();
-        if (camp?.auto_followup && Array.isArray(camp.follow_up_days)) {
-          const { data: existing } = await supabase
-            .from("pitch_sequences").select("step")
-            .eq("lead_id", pitch.lead_id).eq("parent_pitch_id", pitch.id);
-          const haveSteps = new Set((existing ?? []).map((r: any) => r.step));
-          const rows = (camp.follow_up_days as number[]).map((days, i) => ({
-            user_id: pitch.user_id,
-            lead_id: pitch.lead_id,
-            campaign_id: camp.id,
-            parent_pitch_id: pitch.id,
-            step: i + 1,
-            scheduled_at: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
-            status: "scheduled",
-          })).filter((r) => !haveSteps.has(r.step));
-          if (rows.length) await supabase.from("pitch_sequences").insert(rows);
+        // Is this delivered pitch itself a follow-up? If a pitch_sequences
+        // row points at this pitch_id, yes.
+        const { data: isFollowup } = await supabase
+          .from("pitch_sequences").select("id")
+          .eq("pitch_id", pitch.id).limit(1).maybeSingle();
+
+        // Does this lead already have ANY sequences for this campaign?
+        const { count: existingForLead } = await supabase
+          .from("pitch_sequences").select("id", { count: "exact", head: true })
+          .eq("lead_id", pitch.lead_id)
+          .eq("campaign_id", leadRow.campaign_id)
+          .in("status", ["scheduled", "sent", "drafted"]);
+
+        if (!isFollowup && (existingForLead ?? 0) === 0) {
+          const { data: camp } = await supabase
+            .from("campaigns")
+            .select("id, follow_up_days, auto_followup")
+            .eq("id", leadRow.campaign_id).maybeSingle();
+          if (camp?.auto_followup && Array.isArray(camp.follow_up_days)) {
+            const rows = (camp.follow_up_days as number[]).map((days, i) => ({
+              user_id: pitch.user_id,
+              lead_id: pitch.lead_id,
+              campaign_id: camp.id,
+              parent_pitch_id: pitch.id,
+              step: i + 1,
+              scheduled_at: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+              status: "scheduled",
+            }));
+            if (rows.length) {
+              // Upsert-style: rely on the new unique partial index
+              // pitch_sequences_unique_active_step (lead_id, step) WHERE status='scheduled'
+              // to absorb any race that tries to insert a duplicate step.
+              await supabase.from("pitch_sequences").insert(rows);
+            }
+          }
         }
       }
     }
+
 
     return json(200, { ok: true, matched: true, event });
   } catch (e) {
