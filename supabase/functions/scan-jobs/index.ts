@@ -144,7 +144,17 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
       .from("job_posts").select("url").eq("user_id", userId).in("url", urls);
     const existingSet = new Set((existing ?? []).map((e: any) => e.url));
     const fresh = allJobs.filter((j) => !existingSet.has(j.url));
-    if (fresh.length === 0) continue;
+    // Tally per-source kept_new
+    for (const j of fresh) {
+      const ps = perSource.find((p) => p.name === j.source);
+      if (ps) ps.kept_new += 1;
+    }
+    if (fresh.length === 0) {
+      for (const ps of perSource) {
+        logEvent("info", `source:${ps.name} fetched=${ps.fetched} kept_new=0 (all duplicates)`);
+      }
+      continue;
+    }
 
     // Pull profile memory + offering
     const [memRes, offRes] = await Promise.all([
