@@ -8,7 +8,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Copy, ExternalLink, Wand2, AlertCircle, Plus, Mail } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Copy, ExternalLink, Wand2, AlertCircle, Plus, Mail, Check, X } from "lucide-react";
 import { toast } from "sonner";
 
 const JOB_PROFILE_SLUG = "job-application-profile";
