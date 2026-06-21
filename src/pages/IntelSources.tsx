@@ -257,6 +257,7 @@ const IntelSources = () => {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-medium truncate">{s.name}</p>
+                      <Badge variant="outline" className="text-[10px] capitalize">{(s.kind || "news").replace("_", " ")}</Badge>
                       {s.auto_promoted && (
                         <Badge variant="secondary" className="text-[10px] gap-1">
                           <Sparkles className="h-2.5 w-2.5" /> Auto-promoted
