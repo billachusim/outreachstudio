@@ -4,6 +4,7 @@
 // can later be threaded back to the exact pitch.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkBudget } from "../_shared/email-budget.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,24 +67,10 @@ Deno.serve(async (req) => {
     const { data: { user }, error: uerr } = await supabase.auth.getUser();
     if (uerr || !user) return json(401, { error: "Unauthorized" });
 
-    const { pitchId, dailyCap = DEFAULT_DAILY_CAP } = (await req.json()) as Body;
+    const { pitchId } = (await req.json()) as Body;
     if (!pitchId) return json(400, { error: "pitchId required" });
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const { count: sentToday } = await supabase
-      .from("pitches")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("sent_at", startOfDay.toISOString());
-
-    if ((sentToday ?? 0) >= dailyCap) {
-      return json(429, {
-        error: `Daily send cap reached (${sentToday}/${dailyCap}). Try again tomorrow or raise the cap.`,
-        sentToday,
-        dailyCap,
-      });
-    }
+    // We'll check the bucket-aware daily budget after we know the lead's campaign mode.
 
     const { data: pitch, error: perr } = await supabase
       .from("pitches")
