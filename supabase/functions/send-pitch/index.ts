@@ -97,13 +97,25 @@ Deno.serve(async (req) => {
 
     const { data: lead, error: lerr } = await supabase
       .from("leads")
-      .select("id, business_name, contact_email, contact_name, status")
+      .select("id, business_name, contact_email, contact_name, status, job_post_id")
       .eq("id", pitch.lead_id)
       .maybeSingle();
     if (lerr) return json(500, { error: lerr.message });
     if (!lead) return json(404, { error: "Lead not found" });
     if (!lead.contact_email) {
       return json(400, { error: `${lead.business_name} has no contact email` });
+    }
+
+    // Job-hunt freshness gate: skip postings older than 30 days.
+    if (lead.job_post_id) {
+      const { data: jp } = await supabase
+        .from("job_posts").select("posted_at, status").eq("id", lead.job_post_id).maybeSingle();
+      const postedAt = jp?.posted_at ? new Date(jp.posted_at).getTime() : null;
+      if (postedAt && Date.now() - postedAt > 30 * 86400000) {
+        await supabase.from("job_posts").update({ status: "stale" }).eq("id", lead.job_post_id);
+        await supabase.from("leads").update({ status: "lost" }).eq("id", lead.id);
+        return json(410, { error: "Job posting is more than 30 days old — marked stale, not sending." });
+      }
     }
 
     const messageIdHeader = buildMessageId(pitch.id);
