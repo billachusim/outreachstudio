@@ -629,21 +629,22 @@ Notes: ${lead.notes ?? ""}`;
 
 
 
-      // Find highest-score drafted lead with a pitch + email
+      // Channel-aware lead pick: email needs contact_email, whatsapp needs phone.
+      const isWhatsApp = channelKey === "whatsapp";
+      const recipientCol = isWhatsApp ? "phone" : "contact_email";
+      const leadSelect = "id, business_name, contact_email, phone, status, score";
       const { data: lead } = await supabase
         .from("leads")
-        .select("id, business_name, contact_email, status, score")
+        .select(leadSelect)
         .eq("campaign_id", campaign.id)
         .eq("status", "drafted")
-        .not("contact_email", "is", null)
+        .not(recipientCol, "is", null)
         .order("score", { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle();
 
 
       if (!lead) {
-        // Done sending. Mark run done, and auto-archive the campaign if its
-        // follow-up cycle has fully run out (no scheduled sequences remain).
         await logEvent("done", `Outreach complete for "${campaign.name}". Sent ${run.leads_sent}.`);
         await updateRun({ state: "done" as never });
 
@@ -657,24 +658,26 @@ Notes: ${lead.notes ?? ""}`;
         return json(200, { ok: true, transition: "sending->done" });
       }
 
-      // Duplicate-recipient guard: if this email has already been sent to in
-      // another active pitch within the last 14 days (the follow-up window),
-      // skip this lead so we don't spam the same person from parallel campaigns.
-      const cutoff = new Date(Date.now() - 14 * 86400000).toISOString();
-      const { data: recent } = await supabase
-        .from("pitches")
-        .select("id, lead_id, leads!inner(contact_email)")
-        .eq("user_id", run.user_id)
-        .eq("leads.contact_email", lead.contact_email)
-        .neq("lead_id", lead.id)
-        .gte("sent_at", cutoff)
-        .limit(1);
-      if (recent && recent.length > 0) {
-        await supabase.from("leads")
-          .update({ status: "skipped_duplicate", last_activity_at: new Date().toISOString() })
-          .eq("id", lead.id);
-        await logEvent("info", `Skipped ${lead.business_name} (${lead.contact_email}) — already emailed in another campaign within 14 days.`, "info", lead.id);
-        return json(200, { ok: true, skippedDuplicate: true });
+      const recipientValue = isWhatsApp ? (lead as any).phone : lead.contact_email;
+
+      // Duplicate-recipient guard (email channel only).
+      if (!isWhatsApp) {
+        const cutoff = new Date(Date.now() - 14 * 86400000).toISOString();
+        const { data: recent } = await supabase
+          .from("pitches")
+          .select("id, lead_id, leads!inner(contact_email)")
+          .eq("user_id", run.user_id)
+          .eq("leads.contact_email", lead.contact_email)
+          .neq("lead_id", lead.id)
+          .gte("sent_at", cutoff)
+          .limit(1);
+        if (recent && recent.length > 0) {
+          await supabase.from("leads")
+            .update({ status: "skipped_duplicate", last_activity_at: new Date().toISOString() })
+            .eq("id", lead.id);
+          await logEvent("info", `Skipped ${lead.business_name} (${lead.contact_email}) — already emailed in another campaign within 14 days.`, "info", lead.id);
+          return json(200, { ok: true, skippedDuplicate: true });
+        }
       }
 
 
@@ -688,54 +691,83 @@ Notes: ${lead.notes ?? ""}`;
         .maybeSingle();
 
       if (!pitch) {
-        // No unsent pitch — push lead back to enriched so it gets a draft
         await supabase.from("leads").update({ status: "enriched" }).eq("id", lead.id);
         return json(200, { ok: true, requeued: true });
       }
 
-      if (!RESEND_API_KEY) {
-        await logEvent("error", "Resend not connected — cannot send", "error", lead.id);
-        await updateRun({ state: "paused" as never, error: "Resend not connected" });
-        return json(200, { ok: false });
+      let sentOk = false;
+      let providerId: string | null = null;
+      let sendPayload: unknown = null;
+      let errMessage = "";
+
+      if (isWhatsApp) {
+        const waRes = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": req.headers.get("Authorization") ?? `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
+            "apikey": Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+          },
+          body: JSON.stringify({ leadId: lead.id, body: pitch.body, campaignId: campaign.id }),
+        });
+        const waJson = await waRes.json().catch(() => ({}));
+        sendPayload = waJson;
+        if (waRes.ok && !(waJson as any)?.error) {
+          sentOk = true;
+          providerId = (waJson as any)?.providerMessageId ?? (waJson as any)?.messages?.[0]?.id ?? null;
+        } else {
+          errMessage = (waJson as any)?.error || `HTTP ${waRes.status}`;
+        }
+      } else {
+        if (!RESEND_API_KEY) {
+          await logEvent("error", "Resend not connected — cannot send", "error", lead.id);
+          await updateRun({ state: "paused" as never, error: "Resend not connected" });
+          return json(200, { ok: false });
+        }
+        const sendRes = await fetch(`${RESEND_GATEWAY}/emails`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${LOVABLE_API_KEY}`,
+            "X-Connection-Api-Key": RESEND_API_KEY,
+          },
+          body: JSON.stringify({
+            from: FROM,
+            to: [lead.contact_email],
+            reply_to: REPLY_TO,
+            subject: pitch.subject,
+            html: bodyToHtml(pitch.body ?? ""),
+            text: pitch.body,
+          }),
+        });
+        const sendJson = await sendRes.json().catch(() => ({}));
+        sendPayload = sendJson;
+        if (sendRes.ok) {
+          sentOk = true;
+          providerId = (sendJson as any)?.id ?? null;
+        } else {
+          errMessage = (sendJson as any)?.message || `HTTP ${sendRes.status}`;
+        }
       }
 
-      const sendRes = await fetch(`${RESEND_GATEWAY}/emails`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "X-Connection-Api-Key": RESEND_API_KEY,
-        },
-        body: JSON.stringify({
-          from: FROM,
-          to: [lead.contact_email],
-          reply_to: REPLY_TO,
-          subject: pitch.subject,
-          html: bodyToHtml(pitch.body ?? ""),
-          text: pitch.body,
-        }),
-      });
-      const sendJson = await sendRes.json().catch(() => ({}));
-      if (!sendRes.ok) {
-        await logEvent("error", `Send failed for ${lead.business_name}: ${sendJson?.message || sendRes.status}`, "error", lead.id);
+      if (!sentOk) {
+        await logEvent("error", `${isWhatsApp ? "WhatsApp" : "Email"} send failed for ${lead.business_name}: ${errMessage}`, "error", lead.id);
         await updateRun({ leads_failed: run.leads_failed + 1 });
-        // Move lead to next state-ish so we don't loop on it
         await supabase.from("leads").update({ status: "drafted" }).eq("id", lead.id);
         return json(200, { ok: false });
       }
 
       const sentAt = new Date().toISOString();
-      const providerId = sendJson?.id ?? null;
       await supabase.from("pitches").update({ sent_at: sentAt }).eq("id", pitch.id);
       await supabase.from("leads").update({ status: "sent", last_activity_at: sentAt }).eq("id", lead.id);
-      // Record a "sent" event so the inbox/funnel sees it even if Resend webhook isn't wired yet.
       await supabase.from("pitch_events").insert({
         user_id: run.user_id, pitch_id: pitch.id, lead_id: lead.id,
-        channel: "email", event_type: "sent", provider: "resend",
-        provider_message_id: providerId, recipient: lead.contact_email,
-        occurred_at: sentAt, payload: sendJson,
+        channel: isWhatsApp ? "whatsapp" : "email",
+        event_type: "sent",
+        provider: isWhatsApp ? "whatsapp_cloud" : "resend",
+        provider_message_id: providerId, recipient: recipientValue,
+        occurred_at: sentAt, payload: sendPayload,
       });
-      // Schedule follow-ups
       if ((campaign as any).auto_followup && Array.isArray((campaign as any).follow_up_days)) {
         const rows = ((campaign as any).follow_up_days as number[]).map((days, i) => ({
           user_id: run.user_id, lead_id: lead.id, campaign_id: campaign.id,
@@ -745,7 +777,7 @@ Notes: ${lead.notes ?? ""}`;
         }));
         if (rows.length) await supabase.from("pitch_sequences").insert(rows);
       }
-      await logEvent("sent", `Sent pitch to ${lead.business_name} (${lead.contact_email})`, "info", lead.id);
+      await logEvent("sent", `Sent ${isWhatsApp ? "WhatsApp" : "email"} pitch to ${lead.business_name} (${recipientValue})`, "info", lead.id);
       await updateRun({ leads_sent: run.leads_sent + 1 });
       return json(200, { ok: true });
     }

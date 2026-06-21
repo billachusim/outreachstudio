@@ -13,9 +13,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Radio, MessageCircle, Twitter, Facebook, Instagram, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Radio, MessageCircle, Twitter, Facebook, Instagram, Linkedin, ExternalLink, ShieldCheck } from "lucide-react";
 
-type Channel = "whatsapp" | "x" | "facebook" | "instagram";
+type Channel = "whatsapp" | "x" | "facebook" | "instagram" | "linkedin";
 
 type Account = {
   id: string;
@@ -65,6 +65,12 @@ const CHANNEL_META: Record<Channel, { label: string; icon: typeof Radio; fields:
       { key: "page_access_token", label: "Page access token", placeholder: "EAAG...", secret: true },
     ],
     help: "Connect an IG Business account to a Facebook Page. Use the Page access token (with instagram_basic + instagram_content_publish) and your IG user ID.",
+  },
+  linkedin: {
+    label: "LinkedIn (managed by Lovable)",
+    icon: Linkedin,
+    fields: [],
+    help: "Already connected via the Lovable connector. OAuth + token refresh handled automatically. No keys needed.",
   },
 };
 
