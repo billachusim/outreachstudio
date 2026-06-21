@@ -84,13 +84,25 @@ Deno.serve(async (req) => {
 
     const { data: lead, error: lerr } = await supabase
       .from("leads")
-      .select("id, business_name, contact_email, contact_name, status, job_post_id")
+      .select("id, business_name, contact_email, contact_name, status, job_post_id, campaign_id")
       .eq("id", pitch.lead_id)
       .maybeSingle();
     if (lerr) return json(500, { error: lerr.message });
     if (!lead) return json(404, { error: "Lead not found" });
     if (!lead.contact_email) {
       return json(400, { error: `${lead.business_name} has no contact email` });
+    }
+
+    // Bucket-aware daily budget (outreach vs job_hunt).
+    let mode: "job_hunt" | "outreach" = "outreach";
+    if (lead.campaign_id) {
+      const { data: camp } = await supabase
+        .from("campaigns").select("mode").eq("id", lead.campaign_id).maybeSingle();
+      if (camp?.mode === "job_hunt") mode = "job_hunt";
+    }
+    const budget = await checkBudget(supabase, user.id, mode);
+    if (!budget.ok) {
+      return json(429, { error: budget.reason + " — try again tomorrow or raise it from the dashboard.", sent: budget.sent, cap: budget.cap });
     }
 
     // Job-hunt freshness gate: skip postings older than 30 days.
