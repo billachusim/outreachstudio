@@ -40,7 +40,7 @@ const IntelSources = () => {
   const load = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("intel_sources").select("*").order("created_at");
+      .from("intel_sources").select("*").eq("kind", "news").order("created_at");
     if (error) toast.error(error.message);
     setSources((data as Source[]) ?? []);
     setLoading(false);
@@ -173,12 +173,10 @@ const IntelSources = () => {
               <Label className="text-xs uppercase text-muted-foreground">Kind</Label>
               <select
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={kind}
-                onChange={(e) => setKind(e.target.value as Kind)}
+                value="news"
+                disabled
               >
                 <option value="news">News</option>
-                <option value="job_board">Job board</option>
-                <option value="talent_marketplace">Talent marketplace</option>
               </select>
             </div>
             <div className="flex items-end">
@@ -186,10 +184,9 @@ const IntelSources = () => {
             </div>
           </div>
           <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-            <span>Job boards are scanned every 3 hours by the freelance pipeline.</span>
-            <Button size="sm" variant="outline" onClick={scanJobsNow} disabled={scanning}>
-              {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {scanning ? "Scanning…" : "Scan jobs now"}
+            <span>Looking for job boards or talent marketplaces? They live in the Jobs page.</span>
+            <Button size="sm" variant="outline" asChild>
+              <Link to="/jobs?tab=sources"><Sparkles className="h-4 w-4" /> Manage in Jobs</Link>
             </Button>
           </div>
         </CardContent>
