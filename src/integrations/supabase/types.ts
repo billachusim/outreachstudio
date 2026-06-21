@@ -550,6 +550,8 @@ export type Database = {
       }
       job_posts: {
         Row: {
+          application_kit: Json | null
+          application_kit_updated_at: string | null
           apply_email: string | null
           apply_url: string | null
           company: string | null
@@ -572,6 +574,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          application_kit?: Json | null
+          application_kit_updated_at?: string | null
           apply_email?: string | null
           apply_url?: string | null
           company?: string | null
@@ -594,6 +598,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          application_kit?: Json | null
+          application_kit_updated_at?: string | null
           apply_email?: string | null
           apply_url?: string | null
           company?: string | null
