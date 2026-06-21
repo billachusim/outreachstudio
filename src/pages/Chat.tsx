@@ -111,7 +111,7 @@ const Chat = () => {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto w-full max-w-3xl px-3 py-4 sm:px-6 sm:py-6">
           {empty ? (
             <div className="flex min-h-[50vh] flex-col items-center justify-center gap-5 text-center">
