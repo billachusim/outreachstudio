@@ -169,7 +169,7 @@ export const CvTailorPanel = () => {
           </CardHeader>
           <CardContent>
             <div
-              className="prose prose-sm max-w-none dark:prose-invert rounded-md border bg-muted/20 p-4"
+              className="max-w-none rounded-md border bg-muted/20 p-4 text-sm leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:uppercase [&_h2]:tracking-wide [&_h2]:mt-4 [&_h2]:mb-1 [&_h2]:border-b [&_h2]:pb-1 [&_h3]:font-semibold [&_h3]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_p]:my-1 [&_a]:text-primary [&_a]:underline [&_strong]:font-semibold"
               dangerouslySetInnerHTML={{ __html: mdToHtml(out.markdown) }}
             />
           </CardContent>
