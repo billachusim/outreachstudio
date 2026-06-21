@@ -109,8 +109,6 @@ ${block}`,
     } finally { setSavingField(null); }
   };
 
-  };
-
   if (!kit) return null;
 
   const methodBadge = kit.apply_method === "email" ? "Email apply"
@@ -124,11 +122,14 @@ ${block}`,
           <DialogTitle className="flex items-center gap-2 truncate">
             <Wand2 className="h-4 w-4" /> Application Kit — {job?.title}
           </DialogTitle>
-          <DialogDescription className="flex flex-wrap items-center gap-2">
-            <span className="truncate">{[job?.company, job?.location, job?.source].filter(Boolean).join(" · ")}</span>
-            <Badge variant="outline" className="text-[10px]">{methodBadge}</Badge>
+          <DialogDescription className="truncate">
+            {[job?.company, job?.location, job?.source].filter(Boolean).join(" · ")}
           </DialogDescription>
+          <div className="pt-1">
+            <Badge variant="outline" className="text-[10px]">{methodBadge}</Badge>
+          </div>
         </DialogHeader>
+
 
         {kit.summary && <p className="text-sm text-muted-foreground">{kit.summary}</p>}
 
