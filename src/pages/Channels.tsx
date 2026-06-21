@@ -13,9 +13,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Radio, MessageCircle, Twitter, Facebook, Instagram, Linkedin, ExternalLink, ShieldCheck } from "lucide-react";
+import { Plus, Trash2, Radio, MessageCircle, Twitter, Facebook, Instagram, Linkedin, Send, ExternalLink, ShieldCheck } from "lucide-react";
 
-type Channel = "whatsapp" | "x" | "facebook" | "instagram" | "linkedin";
+type Channel = "whatsapp" | "x" | "facebook" | "instagram" | "linkedin" | "telegram";
 
 type Account = {
   id: string;
@@ -71,6 +71,14 @@ const CHANNEL_META: Record<Channel, { label: string; icon: typeof Radio; fields:
     icon: Linkedin,
     fields: [],
     help: "Already connected via the Lovable connector. OAuth + token refresh handled automatically. No keys needed.",
+  },
+  telegram: {
+    label: "Telegram (managed by Lovable)",
+    icon: Send,
+    fields: [
+      { key: "chat_id", label: "Chat / channel ID", placeholder: "@yourchannel or -1001234567890" },
+    ],
+    help: "Telegram bot auth is handled by the Lovable connector. Just create a channel (or group), add the bot as admin, then paste the @channel handle or numeric chat ID here. For a private DM, /start the bot and paste your numeric user ID.",
   },
 };
 
