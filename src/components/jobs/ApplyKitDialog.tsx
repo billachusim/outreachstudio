@@ -8,7 +8,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Copy, ExternalLink, Wand2, AlertCircle, Plus, Mail } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Copy, ExternalLink, Wand2, AlertCircle, Plus, Mail, Check, X } from "lucide-react";
 import { toast } from "sonner";
 
 const JOB_PROFILE_SLUG = "job-application-profile";
@@ -41,6 +42,9 @@ type Props = {
 export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
   const { user } = useAuth();
   const [savingField, setSavingField] = useState<string | null>(null);
+  const [openInput, setOpenInput] = useState<string | null>(null);
+  const [inputValue, setInputValue] = useState("");
+  const [savedFields, setSavedFields] = useState<Set<string>>(new Set());
 
   const copy = async (txt: string, label: string) => {
     try { await navigator.clipboard.writeText(txt); toast.success(`${label} copied`); }
@@ -55,8 +59,13 @@ export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
     copy(blob, "All answers");
   };
 
-  const addToProfile = async (item: { field: string; why?: string; profile_question?: string }) => {
+  const addToProfile = async (
+    item: { field: string; why?: string; profile_question?: string },
+    answer: string,
+  ) => {
     if (!user) return;
+    const trimmed = answer.trim();
+    if (!trimmed) { toast.error("Enter a value first"); return; }
     setSavingField(item.field);
     try {
       const { data: existing } = await supabase.from("agent_memories")
@@ -66,24 +75,33 @@ export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
         .maybeSingle();
 
       const heading = `## ${item.field}`;
-      // Dedupe: skip if same field already recorded
-      if (existing?.content?.includes(heading)) {
-        toast.info(`"${item.field}" is already in your job profile`, {
-          action: { label: "Open Memory", onClick: () => window.location.assign("/memory") },
-        });
-        return;
-      }
-
       const block = [
         heading,
         item.profile_question ? `_Question:_ ${item.profile_question}` : "",
         item.why ? `_Why we need it:_ ${item.why}` : "",
-        `**Answer:** _(TODO — fill in)_`,
+        `**Answer:** ${trimmed}`,
       ].filter(Boolean).join("\n");
+
+      let newContent: string;
+      if (existing?.content?.includes(heading)) {
+        // Replace existing block for that heading (up to next ## or end)
+        const re = new RegExp(`${heading.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}[\\s\\S]*?(?=\\n## |$)`);
+        newContent = (existing.content ?? "").replace(re, block + "\n");
+      } else if (existing) {
+        newContent = `${existing.content ?? ""}\n\n${block}`;
+      } else {
+        newContent =
+`# Job application profile
+
+Fields the Apply Assistant has needed across job applications.
+Saved answers here are reused automatically on future applications.
+
+${block}`;
+      }
 
       if (existing) {
         await supabase.from("agent_memories")
-          .update({ content: `${existing.content ?? ""}\n\n${block}` })
+          .update({ content: newContent })
           .eq("id", existing.id);
       } else {
         await supabase.from("agent_memories").insert({
@@ -91,23 +109,25 @@ export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
           slug: JOB_PROFILE_SLUG,
           title: JOB_PROFILE_TITLE,
           kind: "portfolio",
-          content:
-`# Job application profile
-
-Fields the Apply Assistant has needed across job applications.
-Fill in the answers under each heading — once answered, the assistant will reuse them automatically.
-
-${block}`,
+          content: newContent,
         });
       }
-      toast.success(`Added "${item.field}" to job profile`, {
-        description: "Open Memory → Job application profile to fill in the answer.",
+      setSavedFields(prev => new Set(prev).add(item.field));
+      setOpenInput(null);
+      setInputValue("");
+      toast.success(`Saved "${item.field}" to job profile`, {
         action: { label: "Open Memory", onClick: () => window.location.assign("/memory") },
       });
     } catch (e: any) {
       toast.error(e?.message || "Save failed");
     } finally { setSavingField(null); }
   };
+
+  const startInput = (field: string) => {
+    setOpenInput(field);
+    setInputValue("");
+  };
+
 
   if (!kit) return null;
 
@@ -149,24 +169,72 @@ ${block}`,
               </Link>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Saved to a dedicated <span className="font-mono">job-application-profile</span> memory.
-              Fill in the answers there once and the assistant reuses them on future applications.
+              Enter the value and we'll save it to your <span className="font-mono">job-application-profile</span> memory and reuse it on future applications.
             </p>
 
             <div className="divide-y rounded-md border bg-muted/20">
-              {kit.missing_info.map((m, i) => (
-                <div key={i} className="flex items-start gap-2 p-2.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">{m.field}</div>
-                    {m.why && <div className="text-xs text-muted-foreground">{m.why}</div>}
-                    {m.profile_question && <div className="mt-1 text-xs italic text-muted-foreground">"{m.profile_question}"</div>}
+              {kit.missing_info.map((m, i) => {
+                const saved = savedFields.has(m.field);
+                const isOpen = openInput === m.field;
+                const multiline = /why|describe|cover|summary|reason|tell us|explain/i.test(
+                  `${m.field} ${m.profile_question ?? ""}`,
+                );
+                return (
+                  <div key={i} className="space-y-2 p-2.5">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium">{m.field}</div>
+                        {m.why && <div className="text-xs text-muted-foreground">{m.why}</div>}
+                        {m.profile_question && <div className="mt-1 text-xs italic text-muted-foreground">"{m.profile_question}"</div>}
+                      </div>
+                      {saved ? (
+                        <Badge variant="outline" className="h-6 gap-1 text-[10px]">
+                          <Check className="h-3 w-3" /> Saved
+                        </Badge>
+                      ) : !isOpen ? (
+                        <Button size="sm" variant="outline" className="h-7" onClick={() => startInput(m.field)}>
+                          <Plus className="h-3.5 w-3.5" /> Add
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    {isOpen && (
+                      <div className="flex items-start gap-2">
+                        {multiline ? (
+                          <Textarea
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            placeholder={m.profile_question || `Enter your ${m.field.toLowerCase()}`}
+                            rows={3}
+                            className="text-xs"
+                            autoFocus
+                          />
+                        ) : (
+                          <Input
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            placeholder={m.profile_question || `Enter your ${m.field.toLowerCase()}`}
+                            className="h-8 text-xs"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { e.preventDefault(); addToProfile(m, inputValue); }
+                              if (e.key === "Escape") { setOpenInput(null); setInputValue(""); }
+                            }}
+                          />
+                        )}
+                        <Button size="sm" className="h-8" disabled={savingField === m.field}
+                                onClick={() => addToProfile(m, inputValue)}>
+                          <Check className="h-3.5 w-3.5" /> Save
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-8"
+                                onClick={() => { setOpenInput(null); setInputValue(""); }}>
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                  <Button size="sm" variant="outline" className="h-7" disabled={savingField === m.field}
-                          onClick={() => addToProfile(m)}>
-                    <Plus className="h-3.5 w-3.5" /> Add to profile
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
