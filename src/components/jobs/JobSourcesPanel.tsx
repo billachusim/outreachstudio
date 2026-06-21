@@ -131,6 +131,7 @@ export const JobSourcesPanel = () => {
                 <div>
                   <p className="font-medium">{d.name}</p>
                   <p className="text-xs text-muted-foreground">{d.url}</p>
+                  {scanSummary(d.name)}
                 </div>
                 <Badge variant="secondary">Default</Badge>
               </li>
