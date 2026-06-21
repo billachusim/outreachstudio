@@ -1,110 +1,70 @@
+# Plan: Dedicated Jobs page + CV tailoring
 
-## Quick answers to your questions
+## Goal
+Pull every job-hunt feature out of Dashboard / Intel / Memory into one **Jobs** hub, leaving the main Dashboard with a compact summary widget. Add a new "Tailor CV to a job description" tool.
 
-**Templates?** No new template needed. `draft-application` already writes a real cover letter into the existing `pitches` table; `send-pitch` sends it through the same Resend pipeline as cold outreach. The "template" *is* the cover-letter prompt. We'll just polish the prompt + subject style so job replies look like a human applicant, not a sales pitch.
+## 1. New route: `/jobs`
 
-**Dedup?** Already inherited for free. `scan-jobs` upserts on `job_posts.url` (no duplicate posts) and creates one `lead` per post; `send-pitch` and `follow-up-tick` both gate on `pitches.lead_id` and a 24h cooldown, so a job lead can't be re-emailed by accident. We just need to extend "have I contacted this company before?" across job leads too (by `apply_email` + domain).
+Add `Jobs` to the sidebar (between Campaigns and Leads) with a briefcase icon. Mobile tab bar stays as-is.
 
-**Follow-ups for jobs?** Currently `follow-up-tick` runs daily with `follow_up_days` per campaign. For the Freelance Jobs campaign we'll set `follow_up_days = 14`, hard-cap follow-ups at 1 (not 3), and skip follow-up entirely if the original send bounced or the post is older than 30 days.
+The page is tabbed:
 
----
-
-## The real question: how do we split 100 Resend emails/day?
-
-Today everything competes for one shared 100/day cap with a "top 3 campaigns by intel score" gate (campaign-tick.ts:555-628). With job hunt added, that gate would let one noisy job-board scan starve your Tech Faculty outreach (or vice versa). Proposed rule:
-
-```text
-Resend daily budget: 100
-├── reserved_outreach: 60  (Tech Faculty / paid client work — your business)
-├── reserved_jobhunt:  25  (Freelance Jobs campaign)
-└── flex:              15  (goes to whichever side has higher-priority intel today)
+```
+[ Overview ] [ Matches ] [ Sources ] [ CV & Tailor ] [ Pipeline ]
 ```
 
-Why this split:
-- **Outreach pays the bills today.** It gets the bigger floor.
-- **Job hunt is compounding** — even 25 well-targeted applications a day is more than most senior engineers send in a week.
-- **Flex 15** lets a great signal win: if today's intel scan returns 8 hot fintech leads, flex tilts outreach; if `scan-jobs` finds 12 high-score (≥80) postings, flex tilts job hunt.
+- **Overview** — KPIs (scanned, matched, drafted, sent, replies, interviews), today's email budget split, recent activity.
+- **Matches** — full list of `job_posts` with score ≥ 60 (currently truncated in `JobHuntPanel`). Filters: score, source, posted date, status (new / drafted / applied / replied). "Generate draft" + "Re-draft" + "Open application" actions inline. Bulk select → bulk draft.
+- **Sources** — moves the job-board / talent-marketplace portion of `IntelSources` here (filtered to `kind in ('job_board','talent_marketplace')`), plus "Scan jobs now" button and per-source last-scan stats from `aggregator_performance`.
+- **CV & Tailor** — see section 3.
+- **Pipeline** — Kanban-ish view of leads in the Job Hunt campaign by status (drafted → sent → opened → replied → interview), reusing existing `leads` + `pitch_events` data.
 
-Decision happens once per day in a small `budget-allocator` step inside `daily-briefing` (which already runs at 06:00). It writes today's `email_budget` row with `{ outreach_cap, jobhunt_cap }`, and both `campaign-tick` + `follow-up-tick` read it instead of the hard-coded 100.
+## 2. Shrink the Dashboard widget
 
-Flex allocation rule (server-side, no UI knob needed):
-```text
-score_outreach = max(intel.relevance_score where kind != job_board, last 24h)
-score_jobhunt  = max(job_posts.score where created today)
-if score_jobhunt - score_outreach >= 15: jobhunt gets flex (40 total)
-else if score_outreach - score_jobhunt >= 15: outreach gets flex (75 total)
-else: split flex 8/7
-```
+Replace today's expanded `JobHuntPanel` on `/` with a compact card:
+- One-line stats row: `Scanned 37 · Matched 18 · Drafts 3 · Sent today 12/40`.
+- Top 3 newest high-score matches with a one-click "Draft" button.
+- "Open Jobs hub →" link to `/jobs`.
 
-You can override per-day from chat: "agent, give job hunt 50 today" → updates `email_budget` row.
+Refactor: extract the heavy sections of `JobHuntPanel.tsx` into `src/components/jobs/JobMatchesList.tsx`, `JobStatsHeader.tsx`, etc. Dashboard imports only the compact summary; `/jobs` imports the full set.
 
----
+## 3. CV tailoring tool (new)
 
-## Job-hunt-specific tweaks
+UI on the **CV & Tailor** tab:
+- **Base CV**: shows the current uploaded CV from `resumes` bucket (moved from Memory). Re-upload supported.
+- **Tailor to a job**: two inputs — paste job description *or* pick from existing `job_posts`. Optional company name / role.
+- Button **Generate tailored CV** → calls new edge function `tailor-cv`.
+- Output panel: rendered Markdown CV, with **Copy**, **Download .md**, **Download .pdf**, **Download .docx**, and **Save to job post** (attaches as `job_posts.tailored_cv_md` so the next "Generate draft" uses it).
 
-1. **Cross-lead dedupe by company.** Before `scan-jobs` creates a lead from a `job_post`, check `leads.contact_email` domain and `leads.business_name` against existing leads for the same user. If matched, attach the job_post to the existing lead instead of creating a new one (so applying to Stripe twice in a month doesn't double-send).
+New edge function `supabase/functions/tailor-cv/index.ts`:
+1. Auth-check JWT, load user's base CV text from storage (or stored `profiles.cv_text`).
+2. Load JD text (from body or `job_posts.id`).
+3. Call Lovable AI (`google/gemini-2.5-pro`) with a structured prompt: rewrite/reorder bullets, surface matching keywords, keep facts truthful, output Markdown sections (Summary, Skills, Experience, Education, Projects).
+4. Return `{ markdown, summary_of_changes, keyword_match_score }`.
+5. PDF/DOCX rendering is done client-side (`jspdf` / `docx` npm) to avoid heavy function deps. Markdown → HTML → PDF.
 
-2. **Follow-up cadence.** New `campaigns.follow_up_days = 14`, `max_follow_ups = 1` for `mode='job_hunt'`. `follow-up-tick` already respects per-campaign `follow_up_days`; we'll just add a `max_follow_ups` column read.
+Schema additions (one migration):
+- `job_posts`: add `tailored_cv_md text`, `tailored_cv_updated_at timestamptz`.
+- `profiles`: add `base_cv_md text` (cached parsed CV so tailoring is fast and doesn't re-OCR every time). Populated by existing `ingest-cv` function — small edit to also persist the extracted text here.
 
-3. **Reply tracking.** Already works — `gmail-reply-sync` + `classify-reply` will tag job replies. We'll add a `reply_intent` value `'job_interview'` so the dashboard can count interviews separately from outreach replies.
+## 4. Cleanup
 
-4. **Post freshness gate.** `send-pitch` checks `job_posts.posted_at`; skip + mark `stale` if > 30 days old.
+After `/jobs` ships and is verified:
+- **Dashboard** (`src/pages/Dashboard.tsx`): replace full `JobHuntPanel` with the new compact `JobsSummaryCard`.
+- **Intel** (`src/pages/Intel.tsx`): keep news-only. Remove job_board scan triggers / job-specific UI; add a small "Looking for jobs? Go to Jobs →" link.
+- **IntelSources** (`src/pages/IntelSources.tsx`): filter the form's "Kind" select to `news` only; route `job_board` / `talent_marketplace` management to `/jobs?tab=sources`. Keep existing rows visible (read-only) with a "Manage in Jobs" link, then drop after migration.
+- **Memory** (`src/pages/Memory.tsx`): remove `CvUploadCard`; replace with a pointer card "CV lives in Jobs → CV & Tailor". Keep agent-memory features intact.
 
----
+No data migration needed — existing `job_posts`, `intel_sources(kind=job_board)`, and the `resumes` bucket all stay where they are; only the UI moves.
 
-## Dashboard telemetry for job hunt
+## 5. Out of scope (call out, don't build now)
+- Auto-tailoring every draft (we'll wire it as an opt-in toggle on the Jobs page once the manual flow is validated).
+- Multi-CV profiles (e.g. one CV per role family) — easy follow-up once `profiles.base_cv_md` exists.
 
-Add a collapsible **"Job Hunt"** panel on `/dashboard`, between the funnel and TopTriggers. Reuses existing tables — no new schema beyond a view.
+## Technical summary
+- **New files**: `src/pages/Jobs.tsx`, `src/components/jobs/{JobsSummaryCard,JobMatchesList,JobStatsHeader,JobSourcesPanel,CvTailorPanel,JobPipelineBoard}.tsx`, `supabase/functions/tailor-cv/index.ts`, one migration.
+- **Edited**: `src/App.tsx` (route), `src/components/AppSidebar.tsx` (nav item), `src/pages/Dashboard.tsx`, `src/pages/Intel.tsx`, `src/pages/IntelSources.tsx`, `src/pages/Memory.tsx`, `supabase/functions/ingest-cv/index.ts` (persist parsed text).
+- **Deps**: add `jspdf`, `docx`, `marked` for client-side export.
 
-Stats shown (last 7d / 30d toggle):
-- Jobs scanned · Posts matched (score ≥60) · Applications sent · Bounced · Replied · Interviews booked
-- Top 3 boards by hit-rate (`remoteok` / `wwr`)
-- Average match score of applications sent
-- Remaining `jobhunt_cap` for today + small bar showing `25/25` used
-
-The existing funnel card gets a small "Outreach only" subtitle so the two are visually separated, not merged.
-
----
-
-## What gets built
-
-### Schema (one migration)
-- `email_budgets` table: `user_id, date, outreach_cap, jobhunt_cap, outreach_sent, jobhunt_sent`
-- `campaigns.max_follow_ups smallint default 3`
-- `job_posts.status` adds `'stale'`
-- Index on `job_posts(user_id, posted_at)`
-- GRANTs + RLS
-
-### Edge functions
-- **New `allocate-email-budget`**: called from `daily-briefing`, writes today's `email_budgets` row using the flex rule above.
-- **Edit `campaign-tick`**: replace `GLOBAL_DAILY_CAP = 100` with budget lookup; route campaigns by `mode` to the correct bucket.
-- **Edit `follow-up-tick`**: same budget-aware cap; honor `max_follow_ups`; for `mode='job_hunt'` use 14-day spacing & cap 1.
-- **Edit `scan-jobs`**: dedupe by company domain before lead insert; mark stale posts.
-- **Edit `draft-application`**: tighter subject ("Re: <role> — <your name>"), human cover-letter voice, no marketing-speak.
-- **Edit `studio-agent`**: add tools `set_email_budget(date, outreach, jobhunt)` and `get_email_budget()` so you can tune from chat.
-
-### UI
-- `src/pages/Dashboard.tsx`: add `<JobHuntPanel />` + "Outreach only" label on existing funnel.
-- New `src/components/JobHuntPanel.tsx`: stats + today's budget bar.
-- `src/pages/Campaigns.tsx`: surface `max_follow_ups` and `follow_up_days` for `mode='job_hunt'` rows (defaults to 14/1, editable).
-
-### Out of scope (for this round)
-- Per-board budget splits (e.g., 60% RemoteOK / 40% WWR) — overkill at 25/day.
-- Auto-reply to interview offers — too risky, leave manual.
-- Buying a second Resend domain to raise the 100 cap — flag it if we ever hit 100 sustained for 7 days.
-
----
-
-## Recommended defaults (you can tweak any time)
-
-| Setting | Default | Why |
-|---|---|---|
-| outreach_cap | 60 | protects your paid pipeline |
-| jobhunt_cap | 25 | enough to land interviews without burnout |
-| flex | 15 | rewards strongest daily signal |
-| job follow-up spacing | 14 days | matches industry norm; not annoying |
-| max job follow-ups | 1 | one polite nudge then move on |
-| stale post threshold | 30 days | don't apply to zombie listings |
-| min apply score | 60 | already in `scan-jobs` |
-
-If you approve, I'll implement everything above in one pass.
+## Open question
+For PDF export styling — should the tailored CV match a template you like (clean single-column, classic two-column, or mirror the look of the CV you uploaded)? Default plan: clean single-column ATS-friendly layout.
