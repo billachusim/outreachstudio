@@ -41,6 +41,9 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
   const [posts, setPosts] = useState<JobPost[]>([]);
   const [scanning, setScanning] = useState(false);
   const [draftingId, setDraftingId] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [kitJob, setKitJob] = useState<JobPost | null>(null);
+  const [kit, setKit] = useState<ApplicationKit | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [search, setSearch] = useState("");
   const [minScore, setMinScore] = useState(60);
