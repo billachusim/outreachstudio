@@ -208,6 +208,13 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
                     {draftingId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
                     {p.status === "drafted" ? "Re-draft" : "Draft"}
                   </Button>
+                  <Button size="sm" variant="default" className="h-7"
+                          onClick={() => p.status === "drafted" ? openExistingKit(p) : runApplyAssistant(p)}
+                          disabled={applyingId === p.id}
+                          title="Scrape the listing and prep every form answer">
+                    {applyingId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                    Apply
+                  </Button>
                 </div>
               ))}
             </div>
