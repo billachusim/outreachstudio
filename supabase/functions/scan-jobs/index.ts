@@ -300,6 +300,13 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
       if (lerr) console.error("scan-jobs lead insert error", lerr);
       else totalLeads++;
     }
+
+    // Per-source summary for the diagnostics panel
+    for (const ps of perSource) {
+      const hint = ps.fetched === 0 ? " (likely requires login or no listings extractable)" : "";
+      logEvent(ps.fetched === 0 ? "warn" : "info",
+        `source:${ps.name} fetched=${ps.fetched} kept_new=${ps.kept_new}${hint}`);
+    }
   }
 
   console.log(`scan-jobs done: ${totalJobs} new posts, ${totalLeads} new leads`);
