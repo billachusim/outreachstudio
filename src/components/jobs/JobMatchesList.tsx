@@ -52,6 +52,7 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
   const [search, setSearch] = useState("");
   const [minScore, setMinScore] = useState(60);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
 
   const load = async () => {
     if (!user) return;
