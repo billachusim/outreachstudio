@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, ArrowLeft, Globe, Sparkles, Loader2, RefreshCw, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
-type Source = { id: string; name: string; url: string; enabled: boolean; created_at: string; auto_promoted: boolean };
+type Kind = "news" | "job_board" | "talent_marketplace";
+type Source = { id: string; name: string; url: string; enabled: boolean; created_at: string; auto_promoted: boolean; kind: Kind };
 type Suggestion = { name: string; url: string; why_relevant: string; type: "news" | "blog" | "directory" | "listicle" };
 
 const DEFAULTS = [
@@ -25,6 +26,8 @@ const IntelSources = () => {
   const [sources, setSources] = useState<Source[]>([]);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [kind, setKind] = useState<Kind>("news");
+  const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Discover state
@@ -51,12 +54,25 @@ const IntelSources = () => {
     let safeUrl = url.trim();
     if (!/^https?:\/\//i.test(safeUrl)) safeUrl = `https://${safeUrl}`;
     const { error } = await supabase.from("intel_sources").insert({
-      user_id: user.id, name: name.trim(), url: safeUrl, enabled: true,
-    });
+      user_id: user.id, name: name.trim(), url: safeUrl, enabled: true, kind,
+    } as never);
     if (error) return toast.error(error.message);
     setName(""); setUrl("");
     toast.success("Source added");
     load();
+  };
+
+  const scanJobsNow = async () => {
+    setScanning(true);
+    try {
+      const { error } = await supabase.functions.invoke("scan-jobs", { body: {} });
+      if (error) throw error;
+      toast.success("Scan started — new jobs will appear in your Freelance Jobs campaign within ~30s.");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Scan failed");
+    } finally {
+      setScanning(false);
+    }
   };
 
   const toggle = async (s: Source) => {
@@ -144,18 +160,37 @@ const IntelSources = () => {
       <Card>
         <CardHeader><CardTitle className="text-base">Add a custom source</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto]">
+          <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_140px_auto]">
             <div className="space-y-1.5">
               <Label className="text-xs uppercase text-muted-foreground">Name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Disrupt Africa" />
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Remote OK" />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs uppercase text-muted-foreground">URL</Label>
-              <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://disrupt-africa.com/" />
+              <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://remoteok.com/" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase text-muted-foreground">Kind</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as Kind)}
+              >
+                <option value="news">News</option>
+                <option value="job_board">Job board</option>
+                <option value="talent_marketplace">Talent marketplace</option>
+              </select>
             </div>
             <div className="flex items-end">
               <Button onClick={add}><Plus className="h-4 w-4 mr-1" /> Add</Button>
             </div>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+            <span>Job boards are scanned every 3 hours by the freelance pipeline.</span>
+            <Button size="sm" variant="outline" onClick={scanJobsNow} disabled={scanning}>
+              {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {scanning ? "Scanning…" : "Scan jobs now"}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -222,6 +257,7 @@ const IntelSources = () => {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-medium truncate">{s.name}</p>
+                      <Badge variant="outline" className="text-[10px] capitalize">{(s.kind || "news").replace("_", " ")}</Badge>
                       {s.auto_promoted && (
                         <Badge variant="secondary" className="text-[10px] gap-1">
                           <Sparkles className="h-2.5 w-2.5" /> Auto-promoted

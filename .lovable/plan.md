@@ -1,81 +1,98 @@
+## Goal
 
-# Make channels buzz — easiest-wins-first plan
+A second track inside Outreach Studio dedicated to landing **you** remote engineering work — as an individual freelancer — running alongside the existing Tech Faculty outreach. Reuses the existing Offerings / Campaigns / Leads / Pitches / Intel pipeline; adds a small amount of new code for job-board scraping and application drafting.
 
-Build in 3 waves, biggest payoff first. Stop after any wave if it's enough.
+## High-level shape
 
----
+```text
+CV upload ──► Agent parses ──► Auto-seeds:
+                                 • Offering "Senior Engineer — Freelance"
+                                 • Agent memories (skills, stack, rate, availability, links)
 
-## Wave 1 — WhatsApp outreach (0 new setup) 🟢
+Intel sources (job boards) ──► scan-jobs (new) ──► job_posts table
+                                                     │
+                                                     ├─ score vs your profile
+                                                     ├─ has email? → lead + auto-draft application email
+                                                     └─ form-only? → lead + draft "application package" (cover letter + tailored bullets) for manual submit
 
-**Why first:** Your WhatsApp Business account is already connected and `send-whatsapp` already works. It just isn't being *called* from anywhere meaningful.
+Talent marketplaces (Micro1, Mercor) ──► profile-sync reminders + weekly nudge in Daily Briefing
+```
 
-**What I'll build:**
-1. **"Send WhatsApp" button on every lead** that has a phone number — invokes `send-whatsapp`, logs to `channel_messages`, shows in Inbox.
-2. **WhatsApp as a campaign channel.** Add a `channel: 'whatsapp' | 'email'` column to campaigns (or campaign_runs). The `campaign-tick` cron will route phone-only leads to WhatsApp, email-only leads to email, and pick the highest-yield channel for leads with both.
-3. **Smart fallback:** if a pitch email bounces or no email exists, auto-fall-back to WhatsApp.
-4. **Follow-up cooldown respected** — `follow-up-tick` already supports per-channel 24h cooldown; just extend it.
+## What we build
 
-**You do:** Nothing. Already connected.
+### 1. CV intake
+- New "Upload CV" action on the Memory page (or a small Profile card on Dashboard).
+- Stored in a new private Storage bucket `resumes/`.
+- New edge function `ingest-cv`: parses the PDF/DOCX, then:
+  - Creates/updates an Offering `Senior Software Engineer — Freelance` (title, tagline, problem_solved, target_audience, trigger_keywords pulled from CV).
+  - Writes structured `agent_memories` entries: skills, years_experience, preferred_stack, rate, availability, timezone, links (GitHub, LinkedIn, portfolio).
+- The agent uses these everywhere it currently uses offerings/memory — no new plumbing needed.
 
----
+### 2. Job boards as intel sources
+Reuse existing `intel_sources` table; add a `kind` column (`news` | `job_board` | `talent_marketplace`) so we can route scraping differently.
 
-## Wave 2 — LinkedIn auto-post (1 click) 🟢
+Seed defaults for `kind = 'job_board'`:
+- `remoteok.com/remote-dev-jobs`
+- `weworkremotely.com/categories/remote-programming-jobs`
+- (later) HN "Who is Hiring" monthly thread, Wellfound
 
-**Why second:** LinkedIn is where your B2B intel-reactions belong. Lovable's connector handles OAuth — you click "Connect LinkedIn" once and we're done. No developer console, no token pasting, no review.
+Seed for `kind = 'talent_marketplace'`:
+- `talent.micro1.ai`
+- `work.mercor.com`
 
-**What I'll build:**
-1. **Connect LinkedIn** via `standard_connectors--connect linkedin` (1-click OAuth in your browser).
-2. **Write `post-linkedin` edge function** that uses the Lovable connector gateway (`/linkedin/v2/ugcPosts`). Auth handled automatically.
-3. **Wire it into Social.tsx** — the existing "Auto-post" button on LinkedIn drafts becomes active.
-4. **Optional: schedule LinkedIn posts** — daily cron to auto-publish 1 top draft per day so you don't have to click.
+### 3. New edge function `scan-jobs`
+Modeled on `scan-intel`. Runs on cron (every 2–3h):
+- For each `job_board` source, Firecrawl-scrape the listing page using a JSON extraction prompt to pull `{title, company, url, location, salary, apply_email, apply_url, posted_at, description_snippet}`.
+- Dedupe by URL into a new table `job_posts`.
+- Score each new post 0–100 against the user's freelance Offering + CV-derived memories (skills overlap, seniority match, remote/region match, rate match). Reuse the same Lovable AI gateway pattern as `scan-intel`.
+- For posts scoring ≥60, create a `lead` (campaign = "Freelance Jobs") linking back to the `job_post`, so the existing Leads UI works unchanged.
 
-**You do:** Click "Connect LinkedIn" once. That's it.
+### 4. Application drafting + sending
+New edge function `draft-application`:
+- Input: `job_post_id`.
+- Fetches the full posting (Firecrawl scrape of the post URL for full description).
+- Uses the AI gateway with the user's CV + offering to generate:
+  - `cover_letter` (email-ready, ≤250 words, role-specific)
+  - `tailored_bullets` (3–5 resume highlights matched to the JD)
+  - `subject_line`
+- Stored on the lead as a `pitch` (reuses existing `pitches` table — no schema bloat).
 
----
+Sending logic (matches your "auto-email, manual for forms" choice):
+- If `job_post.apply_email` present → route through existing `send-pitch` pipeline (uses your already-connected Gmail). Status → `applied`.
+- Else → leave as a draft pitch with the apply URL prominent; surfaced in Inbox/Leads with a "Copy + open apply link" affordance. Status → `ready_to_submit`.
 
-## Wave 3 — Telegram broadcast (1 click, bonus) 🟢
+### 5. Talent marketplaces (Micro1 / Mercor)
+No scraping or auto-apply (these are profile-based, not job-list-based, and have login walls). Instead:
+- New `marketplace_profiles` rows store last-updated date and profile URL.
+- Weekly check in `daily-briefing`: "Your Micro1 profile hasn't been touched in 14 days — refresh availability + add recent project."
+- The agent (Chat) gets a tool `suggest_marketplace_update` that drafts a short bio/availability update for you to paste.
 
-**Why include:** Lovable connector, ~30 sec setup, and great for sending intel briefings + campaign alerts to a Telegram channel or group. Bonus channel with near-zero work.
+### 6. UI changes (minimal, reuse what exists)
+- **Memory page**: add "Upload CV" card + show parsed fields with edit affordance.
+- **Campaigns page**: a campaign is auto-created on first CV upload called "Freelance Jobs" with `mode = 'job_hunt'` (new column). UI is identical to existing campaigns, except the leads tab shows columns: Role / Company / Score / Salary / Apply Method.
+- **Lead drawer**: when `lead.source = 'job_post'`, show JD summary, the drafted cover letter, "Send application" (if email) or "Open apply link + copy draft" (if form).
+- **Intel Sources page**: add a `kind` selector when adding a source; group list by kind.
+- **Chat agent**: gets new tools `list_job_posts`, `get_job_post`, `draft_application`, `submit_application`, `refresh_freelance_profile` — so you can say "find me 3 good senior backend roles posted today and draft applications" and it executes end-to-end.
 
-**What I'll build:**
-1. Connect Telegram bot via Lovable connector.
-2. Add a "Broadcast to Telegram" toggle on intel items + daily briefings.
-3. Edge function `post-telegram` using the gateway.
+### 7. Schema additions (single migration)
+- `intel_sources.kind` (text, default `'news'`).
+- New table `job_posts` (id, user_id, source, title, company, url unique-per-user, apply_email, apply_url, location, salary_text, posted_at, description, score smallint, matched_offering_id, status, created_at) + GRANTs + RLS scoped to `auth.uid()`.
+- New table `marketplace_profiles` (id, user_id, name, url, last_updated_at, notes) + GRANTs + RLS.
+- `campaigns.mode` (text, default `'outreach'`; `'job_hunt'` for freelance).
+- `leads.job_post_id` (uuid nullable, FK to job_posts).
+- Storage bucket `resumes` (private).
 
-**You do:** Click "Connect Telegram" once + paste your channel/chat ID.
+### 8. Cron
+- `scan-jobs` every 3h (pg_cron + pg_net like the existing scan jobs).
+- Daily roll-up included in existing `daily-briefing` (top 5 new scored jobs, marketplace nudges).
 
----
+## Out of scope (for this first pass)
+- Auto-submitting to web forms / Wellfound / LinkedIn Easy Apply — too brittle and ToS-risky. Treated as draft-only.
+- HN "Who is Hiring" parser — easy to add later as just another `job_board` source.
+- Per-user OAuth into Micro1/Mercor — no public APIs; marketplace track stays nudge-based.
 
-## Wave 4 — X / Twitter (optional, only if you want it) 🟡
+## Files touched (roughly)
+- New: `supabase/functions/scan-jobs/index.ts`, `supabase/functions/draft-application/index.ts`, `supabase/functions/ingest-cv/index.ts`.
+- Edited: `daily-briefing`, `studio-agent` (new tools), `IntelSources.tsx`, `Memory.tsx`, `Campaigns.tsx`, `LeadDetailDrawer.tsx`, one migration.
 
-**Honest take:** Free X API tier allows only ~17 posts/day write. To actually scale you need X Basic ($100/mo). Your `post-x` function is already coded and works — you just need to:
-1. Create an X Developer account (free)
-2. Create an app with "Read and Write" permissions
-3. Paste 4 keys into Channels page
-
-**What I'll build (if you proceed):** Polish the Channels.tsx X form with inline help + a "Test post" button. The posting code itself is done.
-
-**You do:** Decide if X is worth $100/mo to you. If yes, ~10 min of setup at developer.x.com.
-
----
-
-## Deferred — Instagram & Facebook 🔴
-
-Both require Meta Business Verification (passport/utility bill upload, multi-day review), an Instagram Business account linked to a Facebook Page, a Graph API token with `instagram_content_publish` + `pages_manage_posts` scopes (requires App Review), and Instagram additionally requires images hosted at a public URL (we'd need to add storage).
-
-**Recommendation:** Skip until you genuinely need them. The friction is unavoidable — it's Meta's policy, not a setup we can shortcut. If you do need them later, it's a separate multi-day project, not a "one click" task.
-
----
-
-## Suggested execution
-
-Do **Wave 1 (WhatsApp)** and **Wave 2 (LinkedIn)** this session — both deliver immediate value, no painful setup. Then decide on Telegram and X based on whether you actually use them.
-
-## Technical notes
-
-- LinkedIn function will use `https://connector-gateway.lovable.dev/linkedin/v2/ugcPosts` with `Authorization: Bearer ${LOVABLE_API_KEY}` + `X-Connection-Api-Key: ${LINKEDIN_API_KEY}`. Auto token refresh, no manual OAuth code.
-- WhatsApp wiring is pure plumbing — no new auth, no new functions, just UI buttons + a `channel` column on campaigns and updated cron logic.
-- Telegram uses `https://connector-gateway.lovable.dev/telegram/bot{token}/sendMessage` similarly.
-- Channels.tsx will keep the manual-creds form for X (and any future custom channels), but gain "Connect with one click" buttons for LinkedIn/Telegram.
-
-Confirm and I'll start with Wave 1 + Wave 2.
+After you approve, I'll also need you to upload your CV in the next message so the first run of `ingest-cv` has something to parse.

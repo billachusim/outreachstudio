@@ -20,6 +20,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb, Globe2 } from "lucide-react";
+import { CvUploadCard } from "@/components/CvUploadCard";
 
 const STARTER_SLUGS = ["identity", "personality", "portfolio", "playbook", "learning-loop"];
 
@@ -297,6 +298,8 @@ const Memory = () => {
           className="pl-9"
         />
       </div>
+
+      <CvUploadCard />
 
       <Card>
         <CardHeader className="pb-3">

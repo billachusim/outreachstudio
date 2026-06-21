@@ -153,6 +153,7 @@ export type Database = {
           follow_up_days: number[]
           id: string
           keywords: string | null
+          mode: string
           name: string
           offering_id: string | null
           social_cap: number
@@ -173,6 +174,7 @@ export type Database = {
           follow_up_days?: number[]
           id?: string
           keywords?: string | null
+          mode?: string
           name: string
           offering_id?: string | null
           social_cap?: number
@@ -193,6 +195,7 @@ export type Database = {
           follow_up_days?: number[]
           id?: string
           keywords?: string | null
+          mode?: string
           name?: string
           offering_id?: string | null
           social_cap?: number
@@ -476,6 +479,7 @@ export type Database = {
           created_at: string
           enabled: boolean
           id: string
+          kind: string
           name: string
           url: string
           user_id: string
@@ -485,6 +489,7 @@ export type Database = {
           created_at?: string
           enabled?: boolean
           id?: string
+          kind?: string
           name: string
           url: string
           user_id: string
@@ -494,7 +499,71 @@ export type Database = {
           created_at?: string
           enabled?: boolean
           id?: string
+          kind?: string
           name?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      job_posts: {
+        Row: {
+          apply_email: string | null
+          apply_url: string | null
+          company: string | null
+          created_at: string
+          description: string | null
+          id: string
+          location: string | null
+          matched_offering_id: string | null
+          posted_at: string | null
+          salary_text: string | null
+          score: number | null
+          source: string | null
+          status: string
+          tags: string[] | null
+          title: string
+          updated_at: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          apply_email?: string | null
+          apply_url?: string | null
+          company?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          location?: string | null
+          matched_offering_id?: string | null
+          posted_at?: string | null
+          salary_text?: string | null
+          score?: number | null
+          source?: string | null
+          status?: string
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          apply_email?: string | null
+          apply_url?: string | null
+          company?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          location?: string | null
+          matched_offering_id?: string | null
+          posted_at?: string | null
+          salary_text?: string | null
+          score?: number | null
+          source?: string | null
+          status?: string
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
           url?: string
           user_id?: string
         }
@@ -590,6 +659,7 @@ export type Database = {
           facebook_url: string | null
           id: string
           instagram_url: string | null
+          job_post_id: string | null
           last_activity_at: string | null
           last_enriched_at: string | null
           linkedin_url: string | null
@@ -615,6 +685,7 @@ export type Database = {
           facebook_url?: string | null
           id?: string
           instagram_url?: string | null
+          job_post_id?: string | null
           last_activity_at?: string | null
           last_enriched_at?: string | null
           linkedin_url?: string | null
@@ -640,6 +711,7 @@ export type Database = {
           facebook_url?: string | null
           id?: string
           instagram_url?: string | null
+          job_post_id?: string | null
           last_activity_at?: string | null
           last_enriched_at?: string | null
           linkedin_url?: string | null
@@ -662,7 +734,47 @@ export type Database = {
             referencedRelation: "campaigns"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "leads_job_post_id_fkey"
+            columns: ["job_post_id"]
+            isOneToOne: false
+            referencedRelation: "job_posts"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      marketplace_profiles: {
+        Row: {
+          created_at: string
+          id: string
+          last_updated_at: string | null
+          name: string
+          notes: string | null
+          updated_at: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_updated_at?: string | null
+          name: string
+          notes?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_updated_at?: string | null
+          name?: string
+          notes?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: []
       }
       offerings: {
         Row: {
