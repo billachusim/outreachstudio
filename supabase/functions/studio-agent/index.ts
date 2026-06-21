@@ -327,6 +327,137 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
       });
       return r;
     }
+
+    // ---------- Offerings ----------
+    case "list_offerings": {
+      const { data } = await supabase.from("offerings")
+        .select("id, title, tagline, status, trigger_keywords, auto_lead_from_intel, ideal_customer, pricing, updated_at")
+        .eq("user_id", userId).order("updated_at", { ascending: false });
+      return data ?? [];
+    }
+    case "get_offering": {
+      const { data } = await supabase.from("offerings").select("*").eq("id", args.offering_id).eq("user_id", userId).maybeSingle();
+      return data ?? { error: "Offering not found" };
+    }
+    case "create_offering": {
+      const { data, error } = await supabase.from("offerings").insert({
+        user_id: userId,
+        title: args.title,
+        tagline: args.tagline ?? null,
+        problem_solved: args.problem_solved ?? null,
+        ideal_customer: args.ideal_customer ?? null,
+        target_audience: args.target_audience ?? null,
+        pricing: args.pricing ?? null,
+        demo_url: args.demo_url ?? null,
+        trigger_keywords: args.trigger_keywords ?? [],
+        auto_lead_from_intel: args.auto_lead_from_intel ?? false,
+        status: "active",
+      }).select("id, title").single();
+      return error ? { error: error.message } : data;
+    }
+    case "update_offering": {
+      const patch: any = {};
+      for (const k of ["title","tagline","problem_solved","ideal_customer","target_audience","pricing","demo_url","status","trigger_keywords","auto_lead_from_intel"]) {
+        if (args[k] !== undefined) patch[k] = args[k];
+      }
+      if (!Object.keys(patch).length) return { error: "No fields to update" };
+      const { error } = await supabase.from("offerings").update(patch).eq("id", args.offering_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, updated: args.offering_id, fields: Object.keys(patch) };
+    }
+
+    // ---------- Campaign update ----------
+    case "update_campaign": {
+      const patch: any = {};
+      for (const k of ["name","city","category","keywords","channel","status","auto_followup","offering_id"]) {
+        if (args[k] !== undefined) patch[k] = args[k];
+      }
+      if (!Object.keys(patch).length) return { error: "No fields to update" };
+      const { error } = await supabase.from("campaigns").update(patch).eq("id", args.campaign_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, updated: args.campaign_id, fields: Object.keys(patch) };
+    }
+
+    // ---------- Lead detail ----------
+    case "get_lead": {
+      const { data: lead } = await supabase.from("leads").select("*").eq("id", args.lead_id).eq("user_id", userId).maybeSingle();
+      if (!lead) return { error: "Lead not found" };
+      const { data: pitches } = await supabase.from("pitches").select("id, subject, body, status, sent_at, created_at").eq("lead_id", args.lead_id).order("created_at", { ascending: false }).limit(5);
+      const { data: events } = await supabase.from("pitch_events").select("event_type, occurred_at").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(10);
+      return { lead, pitches: pitches ?? [], recent_pitch_events: events ?? [] };
+    }
+
+    // ---------- Channels ----------
+    case "list_channels": {
+      const { data } = await supabase.from("channel_accounts")
+        .select("id, channel, display_name, status, external_id, updated_at")
+        .eq("user_id", userId).order("channel");
+      return data ?? [];
+    }
+
+    // ---------- Intel sources ----------
+    case "list_intel_sources": {
+      const { data } = await supabase.from("intel_sources")
+        .select("id, name, url, enabled, auto_promoted, created_at")
+        .eq("user_id", userId).order("created_at", { ascending: false });
+      return data ?? [];
+    }
+    case "add_intel_source": {
+      const { data, error } = await supabase.from("intel_sources").insert({
+        user_id: userId, name: args.name, url: args.url,
+        enabled: args.enabled ?? true, auto_promoted: args.auto_promoted ?? false,
+      }).select("id, name, url").single();
+      return error ? { error: error.message } : data;
+    }
+    case "toggle_intel_source": {
+      const { error } = await supabase.from("intel_sources").update({ enabled: !!args.enabled }).eq("id", args.source_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, source_id: args.source_id, enabled: !!args.enabled };
+    }
+    case "delete_intel_source": {
+      const { error } = await supabase.from("intel_sources").delete().eq("id", args.source_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, deleted: args.source_id };
+    }
+
+    // ---------- Social drafts ----------
+    case "list_social_drafts": {
+      let q = supabase.from("social_drafts")
+        .select("id, platform, body, status, posted_at, provider_post_id, intel_item_id, created_at")
+        .eq("user_id", userId);
+      if (args?.status) q = q.eq("status", args.status);
+      if (args?.platform) q = q.eq("platform", args.platform);
+      const { data } = await q.order("created_at", { ascending: false }).limit(args?.limit ?? 15);
+      return data ?? [];
+    }
+    case "create_social_draft": {
+      const { data, error } = await supabase.from("social_drafts").insert({
+        user_id: userId, platform: args.platform, body: args.body,
+        intel_item_id: args.intel_item_id ?? null, status: "draft",
+      }).select("id, platform, status").single();
+      return error ? { error: error.message } : data;
+    }
+
+    // ---------- Templates ----------
+    case "list_templates": {
+      const { data } = await supabase.from("templates").select("id, name, subject, body, updated_at").eq("user_id", userId).order("updated_at", { ascending: false });
+      return data ?? [];
+    }
+    case "upsert_template": {
+      if (args.template_id) {
+        const patch: any = {};
+        if (args.name !== undefined) patch.name = args.name;
+        if (args.subject !== undefined) patch.subject = args.subject;
+        if (args.body !== undefined) patch.body = args.body;
+        const { error } = await supabase.from("templates").update(patch).eq("id", args.template_id).eq("user_id", userId);
+        return error ? { error: error.message } : { ok: true, updated: args.template_id };
+      }
+      const { data, error } = await supabase.from("templates").insert({
+        user_id: userId, name: args.name, subject: args.subject ?? null, body: args.body ?? null,
+      }).select("id, name").single();
+      return error ? { error: error.message } : data;
+    }
+    case "delete_template": {
+      const { error } = await supabase.from("templates").delete().eq("id", args.template_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, deleted: args.template_id };
+    }
+
     default: return { error: `Unknown tool ${name}` };
   }
 }
