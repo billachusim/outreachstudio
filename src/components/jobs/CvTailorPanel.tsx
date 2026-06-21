@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CvUploadCard } from "@/components/CvUploadCard";
-import { Sparkles, Loader2, Copy, Download, Printer, Save } from "lucide-react";
+import { Sparkles, Loader2, Copy, Download, Printer, Save, FileDown } from "lucide-react";
+import jsPDF from "jspdf";
 import { toast } from "sonner";
 
 type Job = { id: string; title: string; company: string | null; score: number | null };
@@ -91,6 +92,74 @@ export const CvTailorPanel = () => {
     w.document.write(html); w.document.close();
   };
 
+  const downloadPdf = async () => {
+    if (!out) return;
+    try {
+      const doc = new jsPDF({ unit: "pt", format: "letter" });
+      const marginX = 48;
+      const marginY = 56;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const maxWidth = pageWidth - marginX * 2;
+      let y = marginY;
+
+      const ensureSpace = (h: number) => {
+        if (y + h > pageHeight - marginY) { doc.addPage(); y = marginY; }
+      };
+
+      const writeBlock = (text: string, opts: { size: number; bold?: boolean; gapBefore?: number; gapAfter?: number; indent?: number; underline?: boolean }) => {
+        const { size, bold, gapBefore = 0, gapAfter = 4, indent = 0, underline } = opts;
+        if (gapBefore) y += gapBefore;
+        doc.setFont("helvetica", bold ? "bold" : "normal");
+        doc.setFontSize(size);
+        const lines = doc.splitTextToSize(text, maxWidth - indent);
+        const lineH = size * 1.25;
+        for (const line of lines) {
+          ensureSpace(lineH);
+          doc.text(line, marginX + indent, y);
+          y += lineH;
+        }
+        if (underline) {
+          ensureSpace(2);
+          doc.setDrawColor(160);
+          doc.line(marginX, y - lineH * 0.4, pageWidth - marginX, y - lineH * 0.4);
+        }
+        y += gapAfter;
+      };
+
+      const stripInline = (s: string) =>
+        s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1")
+         .replace(/`(.+?)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+
+      const lines = out.markdown.split(/\r?\n/);
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        if (!line.trim()) { y += 4; continue; }
+        const h = line.match(/^(#{1,6})\s+(.*)$/);
+        if (h) {
+          const lvl = h[1].length;
+          const text = stripInline(h[2]);
+          if (lvl === 1) writeBlock(text, { size: 20, bold: true, gapAfter: 6 });
+          else if (lvl === 2) writeBlock(text.toUpperCase(), { size: 11, bold: true, gapBefore: 8, gapAfter: 4, underline: true });
+          else writeBlock(text, { size: 11, bold: true, gapBefore: 4, gapAfter: 2 });
+          continue;
+        }
+        const li = line.match(/^\s*[-*+]\s+(.*)$/);
+        if (li) { writeBlock("• " + stripInline(li[1]), { size: 10.5, indent: 12, gapAfter: 2 }); continue; }
+        if (/^---+$/.test(line)) {
+          ensureSpace(8); doc.setDrawColor(200);
+          doc.line(marginX, y, pageWidth - marginX, y); y += 8; continue;
+        }
+        writeBlock(stripInline(line), { size: 10.5, gapAfter: 3 });
+      }
+
+      doc.save("tailored-cv.pdf");
+      toast.success("PDF downloaded");
+    } catch (e: any) {
+      toast.error(e?.message ?? "PDF export failed");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <CvUploadCard />
@@ -153,7 +222,8 @@ export const CvTailorPanel = () => {
                 )}
                 <Button size="sm" variant="ghost" onClick={copy}><Copy className="h-3.5 w-3.5" /> Copy MD</Button>
                 <Button size="sm" variant="ghost" onClick={downloadMd}><Download className="h-3.5 w-3.5" /> .md</Button>
-                <Button size="sm" variant="ghost" onClick={printPdf}><Printer className="h-3.5 w-3.5" /> Print / PDF</Button>
+                <Button size="sm" variant="ghost" onClick={downloadPdf}><FileDown className="h-3.5 w-3.5" /> Download PDF</Button>
+                <Button size="sm" variant="ghost" onClick={printPdf}><Printer className="h-3.5 w-3.5" /> Print</Button>
               </div>
             </div>
             {out.summary_of_changes && (
