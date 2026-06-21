@@ -440,7 +440,7 @@ Deno.serve(async (req) => {
       return json(200, { ok: true, runId: run.id });
     }
 
-    // STATE: drafting — pick one 'enriched' lead with email, draft via AI gateway
+    // STATE: drafting — pick highest-score 'enriched' lead with email, draft via AI gateway
     if (run.state === "drafting") {
       const { data: lead } = await supabase
         .from("leads")
@@ -448,8 +448,10 @@ Deno.serve(async (req) => {
         .eq("campaign_id", campaign.id)
         .eq("status", "enriched")
         .not("contact_email", "is", null)
+        .order("score", { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle();
+
 
       if (!lead) {
         await logEvent("info", "Drafting complete. Sending next.");
@@ -542,15 +544,15 @@ Notes: ${lead.notes ?? ""}`;
       return json(200, { ok: true });
     }
 
-    // STATE: sending — pick one 'drafted' lead with an unsent pitch, send via Resend
+    // STATE: sending — pick highest-score 'drafted' lead with an unsent pitch, send via Resend
     if (run.state === "sending") {
-      // Daily cap check (per user) — Resend free tier is 100/day, paid up to 120/day.
+      // Daily cap check (per user) — Resend free tier: 100/day, 3000/month.
       const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
       const { count: sentToday } = await supabase
         .from("pitches").select("id", { count: "exact", head: true })
         .eq("user_id", run.user_id).gte("sent_at", startOfDay.toISOString());
 
-      const GLOBAL_DAILY_CAP = 120;
+      const GLOBAL_DAILY_CAP = 100;
       if ((sentToday ?? 0) >= GLOBAL_DAILY_CAP) {
         await logEvent("info", `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Pausing for today.`);
         await updateRun({ state: "paused" as never, error: `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Resumes tomorrow.` });
@@ -563,15 +565,37 @@ Notes: ${lead.notes ?? ""}`;
         return json(200, { ok: true, paused: true });
       }
 
-      // Find oldest drafted lead with a pitch + email
+      // Concurrent-campaign quality gate: at most 3 campaigns may send per day.
+      // Campaigns already sending today keep their slot; new ones beyond the cap
+      // pause until tomorrow so we spend our 100/day on top-priority work.
+      const MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY = 3;
+      const { data: todaysPitches } = await supabase
+        .from("pitches")
+        .select("lead_id, leads!inner(campaign_id)")
+        .eq("user_id", run.user_id)
+        .gte("sent_at", startOfDay.toISOString());
+      const activeCampaignIds = new Set<string>();
+      for (const p of (todaysPitches ?? []) as Array<{ leads: { campaign_id: string | null } | null }>) {
+        const cid = p.leads?.campaign_id;
+        if (cid) activeCampaignIds.add(cid);
+      }
+      if (!activeCampaignIds.has(campaign.id) && activeCampaignIds.size >= MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY) {
+        await logEvent("info", `Daily concurrent-campaign cap reached (${activeCampaignIds.size}/${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY}). Pausing "${campaign.name}" until tomorrow.`);
+        await updateRun({ state: "paused" as never, error: `Concurrent-campaign cap reached. Resumes tomorrow.` });
+        return json(200, { ok: true, paused: true });
+      }
+
+      // Find highest-score drafted lead with a pitch + email
       const { data: lead } = await supabase
         .from("leads")
-        .select("id, business_name, contact_email, status")
+        .select("id, business_name, contact_email, status, score")
         .eq("campaign_id", campaign.id)
         .eq("status", "drafted")
         .not("contact_email", "is", null)
+        .order("score", { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle();
+
 
       if (!lead) {
         // Done sending. Mark run done, and auto-archive the campaign if its

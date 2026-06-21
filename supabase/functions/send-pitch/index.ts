@@ -12,7 +12,7 @@ const corsHeaders = {
 };
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
-const DEFAULT_DAILY_CAP = 120;
+const DEFAULT_DAILY_CAP = 100;
 // Verified domain: techfaculty.ng (Resend)
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
 const SENDING_DOMAIN = "techfaculty.ng";
