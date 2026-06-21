@@ -80,6 +80,36 @@ const TOOLS = [
   { type: "function", function: { name: "search_memories", description: "Search memory files by case-insensitive substring across title, slug, and content. Returns matching slugs + snippets.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number", default: 8 } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "list_recent_intel", description: "List recent intel items (news triggers) for the user, newest first. Use to find the right intel item before drafting a pitch.", parameters: { type: "object", properties: { limit: { type: "number", default: 10 }, min_score: { type: "number" }, only_unactioned: { type: "boolean", default: true } }, additionalProperties: false } } },
   { type: "function", function: { name: "draft_pitch_from_intel", description: "Draft a PR/outreach pitch grounded in a specific intel item (news headline). Pass either intel_item_id, OR a headline_query to fuzzy-match the latest intel by title. Optionally pin to an offering and lead. If save=true, persists the pitch on the lead as a draft.", parameters: { type: "object", properties: { intel_item_id: { type: "string" }, headline_query: { type: "string" }, offering_id: { type: "string" }, lead_id: { type: "string" }, save: { type: "boolean", default: false } }, additionalProperties: false } } },
+
+  // Offerings
+  { type: "function", function: { name: "list_offerings", description: "List the user's offerings (products/services).", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "get_offering", description: "Get a single offering by id.", parameters: { type: "object", properties: { offering_id: { type: "string" } }, required: ["offering_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "create_offering", description: "Create a new offering.", parameters: { type: "object", properties: { title: { type: "string" }, tagline: { type: "string" }, problem_solved: { type: "string" }, ideal_customer: { type: "string" }, target_audience: { type: "string" }, pricing: { type: "string" }, demo_url: { type: "string" }, trigger_keywords: { type: "array", items: { type: "string" } }, auto_lead_from_intel: { type: "boolean" } }, required: ["title"], additionalProperties: false } } },
+  { type: "function", function: { name: "update_offering", description: "Update fields on an offering. Only pass fields you want to change.", parameters: { type: "object", properties: { offering_id: { type: "string" }, title: { type: "string" }, tagline: { type: "string" }, problem_solved: { type: "string" }, ideal_customer: { type: "string" }, target_audience: { type: "string" }, pricing: { type: "string" }, demo_url: { type: "string" }, status: { type: "string" }, trigger_keywords: { type: "array", items: { type: "string" } }, auto_lead_from_intel: { type: "boolean" } }, required: ["offering_id"], additionalProperties: false } } },
+
+  // Campaign update
+  { type: "function", function: { name: "update_campaign", description: "Update a campaign (rename, change channel, toggle auto_followup, change status, update city/category/keywords).", parameters: { type: "object", properties: { campaign_id: { type: "string" }, name: { type: "string" }, city: { type: "string" }, category: { type: "string" }, keywords: { type: "string" }, channel: { type: "string", enum: ["email", "whatsapp", "x", "facebook", "instagram"] }, status: { type: "string", enum: ["active", "paused", "archived"] }, auto_followup: { type: "boolean" }, offering_id: { type: "string" } }, required: ["campaign_id"], additionalProperties: false } } },
+
+  // Lead detail
+  { type: "function", function: { name: "get_lead", description: "Get full detail for a single lead (contact, notes, pitches, latest events).", parameters: { type: "object", properties: { lead_id: { type: "string" } }, required: ["lead_id"], additionalProperties: false } } },
+
+  // Channels
+  { type: "function", function: { name: "list_channels", description: "List connected channel accounts (email, whatsapp, x, facebook, instagram, telegram, linkedin) with status. Does NOT return credentials.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+
+  // Intel sources
+  { type: "function", function: { name: "list_intel_sources", description: "List user's intel sources (feeds we scan for news triggers).", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "add_intel_source", description: "Add a new intel source URL.", parameters: { type: "object", properties: { name: { type: "string" }, url: { type: "string" }, enabled: { type: "boolean", default: true }, auto_promoted: { type: "boolean", default: false } }, required: ["name", "url"], additionalProperties: false } } },
+  { type: "function", function: { name: "toggle_intel_source", description: "Enable or disable an intel source.", parameters: { type: "object", properties: { source_id: { type: "string" }, enabled: { type: "boolean" } }, required: ["source_id", "enabled"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_intel_source", description: "Delete an intel source.", parameters: { type: "object", properties: { source_id: { type: "string" } }, required: ["source_id"], additionalProperties: false } } },
+
+  // Social drafts
+  { type: "function", function: { name: "list_social_drafts", description: "List recent social drafts (queued, draft, posted, failed).", parameters: { type: "object", properties: { status: { type: "string" }, platform: { type: "string" }, limit: { type: "number", default: 15 } }, additionalProperties: false } } },
+  { type: "function", function: { name: "create_social_draft", description: "Create a social draft (does not post). Use platform: x, facebook, instagram, telegram, linkedin.", parameters: { type: "object", properties: { platform: { type: "string" }, body: { type: "string" }, intel_item_id: { type: "string" } }, required: ["platform", "body"], additionalProperties: false } } },
+
+  // Templates
+  { type: "function", function: { name: "list_templates", description: "List the user's email templates.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "upsert_template", description: "Create or update an email template. If template_id is omitted, creates a new one.", parameters: { type: "object", properties: { template_id: { type: "string" }, name: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["name"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_template", description: "Delete an email template.", parameters: { type: "object", properties: { template_id: { type: "string" } }, required: ["template_id"], additionalProperties: false } } },
 ];
 
 async function executeTool(name: string, args: any, ctx: { supabase: any; userId: string; tickUrl: string; serviceKey: string; supaUrl: string; authHeader: string }) {
