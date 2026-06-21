@@ -4,6 +4,7 @@
 // can later be threaded back to the exact pitch.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkBudget } from "../_shared/email-budget.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,14 +13,12 @@ const corsHeaders = {
 };
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
-const DEFAULT_DAILY_CAP = 100;
 // Verified domain: techfaculty.ng (Resend)
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
 const SENDING_DOMAIN = "techfaculty.ng";
 
 interface Body {
   pitchId: string;
-  dailyCap?: number;
 }
 
 const json = (status: number, payload: unknown) =>
@@ -66,24 +65,10 @@ Deno.serve(async (req) => {
     const { data: { user }, error: uerr } = await supabase.auth.getUser();
     if (uerr || !user) return json(401, { error: "Unauthorized" });
 
-    const { pitchId, dailyCap = DEFAULT_DAILY_CAP } = (await req.json()) as Body;
+    const { pitchId } = (await req.json()) as Body;
     if (!pitchId) return json(400, { error: "pitchId required" });
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const { count: sentToday } = await supabase
-      .from("pitches")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("sent_at", startOfDay.toISOString());
-
-    if ((sentToday ?? 0) >= dailyCap) {
-      return json(429, {
-        error: `Daily send cap reached (${sentToday}/${dailyCap}). Try again tomorrow or raise the cap.`,
-        sentToday,
-        dailyCap,
-      });
-    }
+    // We'll check the bucket-aware daily budget after we know the lead's campaign mode.
 
     const { data: pitch, error: perr } = await supabase
       .from("pitches")
@@ -97,13 +82,37 @@ Deno.serve(async (req) => {
 
     const { data: lead, error: lerr } = await supabase
       .from("leads")
-      .select("id, business_name, contact_email, contact_name, status")
+      .select("id, business_name, contact_email, contact_name, status, job_post_id, campaign_id")
       .eq("id", pitch.lead_id)
       .maybeSingle();
     if (lerr) return json(500, { error: lerr.message });
     if (!lead) return json(404, { error: "Lead not found" });
     if (!lead.contact_email) {
       return json(400, { error: `${lead.business_name} has no contact email` });
+    }
+
+    // Bucket-aware daily budget (outreach vs job_hunt).
+    let mode: "job_hunt" | "outreach" = "outreach";
+    if (lead.campaign_id) {
+      const { data: camp } = await supabase
+        .from("campaigns").select("mode").eq("id", lead.campaign_id).maybeSingle();
+      if (camp?.mode === "job_hunt") mode = "job_hunt";
+    }
+    const budget = await checkBudget(supabase, user.id, mode);
+    if (!budget.ok) {
+      return json(429, { error: budget.reason + " — try again tomorrow or raise it from the dashboard.", sent: budget.sent, cap: budget.cap });
+    }
+
+    // Job-hunt freshness gate: skip postings older than 30 days.
+    if (lead.job_post_id) {
+      const { data: jp } = await supabase
+        .from("job_posts").select("posted_at, status").eq("id", lead.job_post_id).maybeSingle();
+      const postedAt = jp?.posted_at ? new Date(jp.posted_at).getTime() : null;
+      if (postedAt && Date.now() - postedAt > 30 * 86400000) {
+        await supabase.from("job_posts").update({ status: "stale" }).eq("id", lead.job_post_id);
+        await supabase.from("leads").update({ status: "lost" }).eq("id", lead.id);
+        return json(410, { error: "Job posting is more than 30 days old — marked stale, not sending." });
+      }
     }
 
     const messageIdHeader = buildMessageId(pitch.id);

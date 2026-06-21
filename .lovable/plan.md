@@ -1,98 +1,110 @@
-## Goal
 
-A second track inside Outreach Studio dedicated to landing **you** remote engineering work — as an individual freelancer — running alongside the existing Tech Faculty outreach. Reuses the existing Offerings / Campaigns / Leads / Pitches / Intel pipeline; adds a small amount of new code for job-board scraping and application drafting.
+## Quick answers to your questions
 
-## High-level shape
+**Templates?** No new template needed. `draft-application` already writes a real cover letter into the existing `pitches` table; `send-pitch` sends it through the same Resend pipeline as cold outreach. The "template" *is* the cover-letter prompt. We'll just polish the prompt + subject style so job replies look like a human applicant, not a sales pitch.
+
+**Dedup?** Already inherited for free. `scan-jobs` upserts on `job_posts.url` (no duplicate posts) and creates one `lead` per post; `send-pitch` and `follow-up-tick` both gate on `pitches.lead_id` and a 24h cooldown, so a job lead can't be re-emailed by accident. We just need to extend "have I contacted this company before?" across job leads too (by `apply_email` + domain).
+
+**Follow-ups for jobs?** Currently `follow-up-tick` runs daily with `follow_up_days` per campaign. For the Freelance Jobs campaign we'll set `follow_up_days = 14`, hard-cap follow-ups at 1 (not 3), and skip follow-up entirely if the original send bounced or the post is older than 30 days.
+
+---
+
+## The real question: how do we split 100 Resend emails/day?
+
+Today everything competes for one shared 100/day cap with a "top 3 campaigns by intel score" gate (campaign-tick.ts:555-628). With job hunt added, that gate would let one noisy job-board scan starve your Tech Faculty outreach (or vice versa). Proposed rule:
 
 ```text
-CV upload ──► Agent parses ──► Auto-seeds:
-                                 • Offering "Senior Engineer — Freelance"
-                                 • Agent memories (skills, stack, rate, availability, links)
-
-Intel sources (job boards) ──► scan-jobs (new) ──► job_posts table
-                                                     │
-                                                     ├─ score vs your profile
-                                                     ├─ has email? → lead + auto-draft application email
-                                                     └─ form-only? → lead + draft "application package" (cover letter + tailored bullets) for manual submit
-
-Talent marketplaces (Micro1, Mercor) ──► profile-sync reminders + weekly nudge in Daily Briefing
+Resend daily budget: 100
+├── reserved_outreach: 60  (Tech Faculty / paid client work — your business)
+├── reserved_jobhunt:  25  (Freelance Jobs campaign)
+└── flex:              15  (goes to whichever side has higher-priority intel today)
 ```
 
-## What we build
+Why this split:
+- **Outreach pays the bills today.** It gets the bigger floor.
+- **Job hunt is compounding** — even 25 well-targeted applications a day is more than most senior engineers send in a week.
+- **Flex 15** lets a great signal win: if today's intel scan returns 8 hot fintech leads, flex tilts outreach; if `scan-jobs` finds 12 high-score (≥80) postings, flex tilts job hunt.
 
-### 1. CV intake
-- New "Upload CV" action on the Memory page (or a small Profile card on Dashboard).
-- Stored in a new private Storage bucket `resumes/`.
-- New edge function `ingest-cv`: parses the PDF/DOCX, then:
-  - Creates/updates an Offering `Senior Software Engineer — Freelance` (title, tagline, problem_solved, target_audience, trigger_keywords pulled from CV).
-  - Writes structured `agent_memories` entries: skills, years_experience, preferred_stack, rate, availability, timezone, links (GitHub, LinkedIn, portfolio).
-- The agent uses these everywhere it currently uses offerings/memory — no new plumbing needed.
+Decision happens once per day in a small `budget-allocator` step inside `daily-briefing` (which already runs at 06:00). It writes today's `email_budget` row with `{ outreach_cap, jobhunt_cap }`, and both `campaign-tick` + `follow-up-tick` read it instead of the hard-coded 100.
 
-### 2. Job boards as intel sources
-Reuse existing `intel_sources` table; add a `kind` column (`news` | `job_board` | `talent_marketplace`) so we can route scraping differently.
+Flex allocation rule (server-side, no UI knob needed):
+```text
+score_outreach = max(intel.relevance_score where kind != job_board, last 24h)
+score_jobhunt  = max(job_posts.score where created today)
+if score_jobhunt - score_outreach >= 15: jobhunt gets flex (40 total)
+else if score_outreach - score_jobhunt >= 15: outreach gets flex (75 total)
+else: split flex 8/7
+```
 
-Seed defaults for `kind = 'job_board'`:
-- `remoteok.com/remote-dev-jobs`
-- `weworkremotely.com/categories/remote-programming-jobs`
-- (later) HN "Who is Hiring" monthly thread, Wellfound
+You can override per-day from chat: "agent, give job hunt 50 today" → updates `email_budget` row.
 
-Seed for `kind = 'talent_marketplace'`:
-- `talent.micro1.ai`
-- `work.mercor.com`
+---
 
-### 3. New edge function `scan-jobs`
-Modeled on `scan-intel`. Runs on cron (every 2–3h):
-- For each `job_board` source, Firecrawl-scrape the listing page using a JSON extraction prompt to pull `{title, company, url, location, salary, apply_email, apply_url, posted_at, description_snippet}`.
-- Dedupe by URL into a new table `job_posts`.
-- Score each new post 0–100 against the user's freelance Offering + CV-derived memories (skills overlap, seniority match, remote/region match, rate match). Reuse the same Lovable AI gateway pattern as `scan-intel`.
-- For posts scoring ≥60, create a `lead` (campaign = "Freelance Jobs") linking back to the `job_post`, so the existing Leads UI works unchanged.
+## Job-hunt-specific tweaks
 
-### 4. Application drafting + sending
-New edge function `draft-application`:
-- Input: `job_post_id`.
-- Fetches the full posting (Firecrawl scrape of the post URL for full description).
-- Uses the AI gateway with the user's CV + offering to generate:
-  - `cover_letter` (email-ready, ≤250 words, role-specific)
-  - `tailored_bullets` (3–5 resume highlights matched to the JD)
-  - `subject_line`
-- Stored on the lead as a `pitch` (reuses existing `pitches` table — no schema bloat).
+1. **Cross-lead dedupe by company.** Before `scan-jobs` creates a lead from a `job_post`, check `leads.contact_email` domain and `leads.business_name` against existing leads for the same user. If matched, attach the job_post to the existing lead instead of creating a new one (so applying to Stripe twice in a month doesn't double-send).
 
-Sending logic (matches your "auto-email, manual for forms" choice):
-- If `job_post.apply_email` present → route through existing `send-pitch` pipeline (uses your already-connected Gmail). Status → `applied`.
-- Else → leave as a draft pitch with the apply URL prominent; surfaced in Inbox/Leads with a "Copy + open apply link" affordance. Status → `ready_to_submit`.
+2. **Follow-up cadence.** New `campaigns.follow_up_days = 14`, `max_follow_ups = 1` for `mode='job_hunt'`. `follow-up-tick` already respects per-campaign `follow_up_days`; we'll just add a `max_follow_ups` column read.
 
-### 5. Talent marketplaces (Micro1 / Mercor)
-No scraping or auto-apply (these are profile-based, not job-list-based, and have login walls). Instead:
-- New `marketplace_profiles` rows store last-updated date and profile URL.
-- Weekly check in `daily-briefing`: "Your Micro1 profile hasn't been touched in 14 days — refresh availability + add recent project."
-- The agent (Chat) gets a tool `suggest_marketplace_update` that drafts a short bio/availability update for you to paste.
+3. **Reply tracking.** Already works — `gmail-reply-sync` + `classify-reply` will tag job replies. We'll add a `reply_intent` value `'job_interview'` so the dashboard can count interviews separately from outreach replies.
 
-### 6. UI changes (minimal, reuse what exists)
-- **Memory page**: add "Upload CV" card + show parsed fields with edit affordance.
-- **Campaigns page**: a campaign is auto-created on first CV upload called "Freelance Jobs" with `mode = 'job_hunt'` (new column). UI is identical to existing campaigns, except the leads tab shows columns: Role / Company / Score / Salary / Apply Method.
-- **Lead drawer**: when `lead.source = 'job_post'`, show JD summary, the drafted cover letter, "Send application" (if email) or "Open apply link + copy draft" (if form).
-- **Intel Sources page**: add a `kind` selector when adding a source; group list by kind.
-- **Chat agent**: gets new tools `list_job_posts`, `get_job_post`, `draft_application`, `submit_application`, `refresh_freelance_profile` — so you can say "find me 3 good senior backend roles posted today and draft applications" and it executes end-to-end.
+4. **Post freshness gate.** `send-pitch` checks `job_posts.posted_at`; skip + mark `stale` if > 30 days old.
 
-### 7. Schema additions (single migration)
-- `intel_sources.kind` (text, default `'news'`).
-- New table `job_posts` (id, user_id, source, title, company, url unique-per-user, apply_email, apply_url, location, salary_text, posted_at, description, score smallint, matched_offering_id, status, created_at) + GRANTs + RLS scoped to `auth.uid()`.
-- New table `marketplace_profiles` (id, user_id, name, url, last_updated_at, notes) + GRANTs + RLS.
-- `campaigns.mode` (text, default `'outreach'`; `'job_hunt'` for freelance).
-- `leads.job_post_id` (uuid nullable, FK to job_posts).
-- Storage bucket `resumes` (private).
+---
 
-### 8. Cron
-- `scan-jobs` every 3h (pg_cron + pg_net like the existing scan jobs).
-- Daily roll-up included in existing `daily-briefing` (top 5 new scored jobs, marketplace nudges).
+## Dashboard telemetry for job hunt
 
-## Out of scope (for this first pass)
-- Auto-submitting to web forms / Wellfound / LinkedIn Easy Apply — too brittle and ToS-risky. Treated as draft-only.
-- HN "Who is Hiring" parser — easy to add later as just another `job_board` source.
-- Per-user OAuth into Micro1/Mercor — no public APIs; marketplace track stays nudge-based.
+Add a collapsible **"Job Hunt"** panel on `/dashboard`, between the funnel and TopTriggers. Reuses existing tables — no new schema beyond a view.
 
-## Files touched (roughly)
-- New: `supabase/functions/scan-jobs/index.ts`, `supabase/functions/draft-application/index.ts`, `supabase/functions/ingest-cv/index.ts`.
-- Edited: `daily-briefing`, `studio-agent` (new tools), `IntelSources.tsx`, `Memory.tsx`, `Campaigns.tsx`, `LeadDetailDrawer.tsx`, one migration.
+Stats shown (last 7d / 30d toggle):
+- Jobs scanned · Posts matched (score ≥60) · Applications sent · Bounced · Replied · Interviews booked
+- Top 3 boards by hit-rate (`remoteok` / `wwr`)
+- Average match score of applications sent
+- Remaining `jobhunt_cap` for today + small bar showing `25/25` used
 
-After you approve, I'll also need you to upload your CV in the next message so the first run of `ingest-cv` has something to parse.
+The existing funnel card gets a small "Outreach only" subtitle so the two are visually separated, not merged.
+
+---
+
+## What gets built
+
+### Schema (one migration)
+- `email_budgets` table: `user_id, date, outreach_cap, jobhunt_cap, outreach_sent, jobhunt_sent`
+- `campaigns.max_follow_ups smallint default 3`
+- `job_posts.status` adds `'stale'`
+- Index on `job_posts(user_id, posted_at)`
+- GRANTs + RLS
+
+### Edge functions
+- **New `allocate-email-budget`**: called from `daily-briefing`, writes today's `email_budgets` row using the flex rule above.
+- **Edit `campaign-tick`**: replace `GLOBAL_DAILY_CAP = 100` with budget lookup; route campaigns by `mode` to the correct bucket.
+- **Edit `follow-up-tick`**: same budget-aware cap; honor `max_follow_ups`; for `mode='job_hunt'` use 14-day spacing & cap 1.
+- **Edit `scan-jobs`**: dedupe by company domain before lead insert; mark stale posts.
+- **Edit `draft-application`**: tighter subject ("Re: <role> — <your name>"), human cover-letter voice, no marketing-speak.
+- **Edit `studio-agent`**: add tools `set_email_budget(date, outreach, jobhunt)` and `get_email_budget()` so you can tune from chat.
+
+### UI
+- `src/pages/Dashboard.tsx`: add `<JobHuntPanel />` + "Outreach only" label on existing funnel.
+- New `src/components/JobHuntPanel.tsx`: stats + today's budget bar.
+- `src/pages/Campaigns.tsx`: surface `max_follow_ups` and `follow_up_days` for `mode='job_hunt'` rows (defaults to 14/1, editable).
+
+### Out of scope (for this round)
+- Per-board budget splits (e.g., 60% RemoteOK / 40% WWR) — overkill at 25/day.
+- Auto-reply to interview offers — too risky, leave manual.
+- Buying a second Resend domain to raise the 100 cap — flag it if we ever hit 100 sustained for 7 days.
+
+---
+
+## Recommended defaults (you can tweak any time)
+
+| Setting | Default | Why |
+|---|---|---|
+| outreach_cap | 60 | protects your paid pipeline |
+| jobhunt_cap | 25 | enough to land interviews without burnout |
+| flex | 15 | rewards strongest daily signal |
+| job follow-up spacing | 14 days | matches industry norm; not annoying |
+| max job follow-ups | 1 | one polite nudge then move on |
+| stale post threshold | 30 days | don't apply to zombie listings |
+| min apply score | 60 | already in `scan-jobs` |
+
+If you approve, I'll implement everything above in one pass.

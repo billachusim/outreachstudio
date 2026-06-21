@@ -1,7 +1,11 @@
 // Process due pitch_sequences: skip if lead already replied; otherwise draft a follow-up
 // (different angle per step) and send via Resend. Cron-driven (every 10 min).
+// Budget-aware: each send is debited against the per-user, per-mode bucket
+// in `email_budgets` (outreach vs job_hunt). Job-hunt follow-ups are
+// hard-capped by `campaigns.max_follow_ups` (default 1 for job_hunt).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkBudget } from "../_shared/email-budget.ts";
 
 const RESEND_GATEWAY = "https://connector-gateway.lovable.dev/resend";
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
@@ -42,8 +46,7 @@ Deno.serve(async (req) => {
 
     if (!due || due.length === 0) return json(200, { ok: true, processed: 0 });
 
-    // Global daily cap (Resend: 120/day per user)
-    const GLOBAL_DAILY_CAP = 100;
+    // Per-send budget check happens inside the loop (mode-aware).
 
     let sent = 0, skipped = 0, failed = 0;
     const touchedCampaigns = new Set<string>();
@@ -69,12 +72,21 @@ Deno.serve(async (req) => {
       }
       if (lead.campaign_id) touchedCampaigns.add(lead.campaign_id);
 
-      // Per-user daily cap (Resend 120/day)
-      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-      const { count: sentToday } = await supabase
-        .from("pitches").select("id", { count: "exact", head: true })
-        .eq("user_id", seq.user_id).gte("sent_at", startOfDay.toISOString());
-      if ((sentToday ?? 0) >= GLOBAL_DAILY_CAP) {
+      // Resolve campaign mode for budget bucket + max_follow_ups
+      let campaignMode: "job_hunt" | "outreach" = "outreach";
+      let maxFollowUps = 3;
+      if (lead.campaign_id) {
+        const { data: camp } = await supabase
+          .from("campaigns")
+          .select("mode, max_follow_ups")
+          .eq("id", lead.campaign_id).maybeSingle();
+        if (camp?.mode === "job_hunt") campaignMode = "job_hunt";
+        if (typeof camp?.max_follow_ups === "number") maxFollowUps = camp.max_follow_ups;
+      }
+
+      // Per-user mode-aware daily budget
+      const budget = await checkBudget(supabase, seq.user_id, campaignMode);
+      if (!budget.ok) {
         // Leave as scheduled — try again tomorrow
         break;
       }
@@ -112,16 +124,16 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Hard cap: at most 3 follow-ups sent per lead per campaign, total.
+      // Hard cap: per-campaign max_follow_ups (default 3, job_hunt = 1).
       if (lead.campaign_id) {
         const { count: sentFollowups } = await supabase
           .from("pitch_sequences").select("id", { count: "exact", head: true })
           .eq("lead_id", lead.id)
           .eq("campaign_id", lead.campaign_id)
           .eq("status", "sent");
-        if ((sentFollowups ?? 0) >= 3) {
+        if ((sentFollowups ?? 0) >= maxFollowUps) {
           await supabase.from("pitch_sequences")
-            .update({ status: "cancelled", reason: "max follow-ups (3) reached" })
+            .update({ status: "cancelled", reason: `max follow-ups (${maxFollowUps}) reached` })
             .eq("lead_id", lead.id).eq("campaign_id", lead.campaign_id).eq("status", "scheduled");
           skipped++;
           continue;

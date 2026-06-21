@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { TopTriggersWidget } from "@/components/TopTriggersWidget";
 import { FetchLeadsProgress } from "@/components/FetchLeadsProgress";
+import { JobHuntPanel } from "@/components/JobHuntPanel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -230,7 +231,10 @@ const Dashboard = () => {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">7-day funnel</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">7-day funnel</CardTitle>
+          <p className="text-xs text-muted-foreground">Outreach campaigns only — see Job Hunt below for application metrics.</p>
+        </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <FunnelStat icon={<Send className="h-4 w-4" />} label="Delivered" value={funnel.sent} />
@@ -241,6 +245,8 @@ const Dashboard = () => {
           </div>
         </CardContent>
       </Card>
+
+      <JobHuntPanel />
 
       <FetchLeadsProgress variant="card" />
 

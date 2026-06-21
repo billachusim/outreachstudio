@@ -45,6 +45,8 @@ type Campaign = {
   whatsapp_cap: number;
   social_cap: number;
   follow_up_days: number[];
+  max_follow_ups?: number;
+  mode?: string;
   created_at: string;
 };
 
@@ -307,20 +309,31 @@ const Campaigns = () => {
                         </div>
                       </div>
 
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase">Follow-up days</Label>
-                        <Input
-                          className="h-8 text-xs"
-                          placeholder="3, 7, 14"
-                          value={(c.follow_up_days ?? [3, 7, 14]).join(", ")}
-                          onChange={(e) => {
-                            const days = e.target.value
-                              .split(",")
-                              .map((s) => parseInt(s.trim(), 10))
-                              .filter((n) => Number.isFinite(n) && n > 0);
-                            updateCampaign(c.id, { follow_up_days: days });
-                          }}
-                        />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase">Follow-up days</Label>
+                          <Input
+                            className="h-8 text-xs"
+                            placeholder={c.mode === "job_hunt" ? "14" : "3, 7, 14"}
+                            value={(c.follow_up_days ?? (c.mode === "job_hunt" ? [14] : [3, 7, 14])).join(", ")}
+                            onChange={(e) => {
+                              const days = e.target.value
+                                .split(",")
+                                .map((s) => parseInt(s.trim(), 10))
+                                .filter((n) => Number.isFinite(n) && n > 0);
+                              updateCampaign(c.id, { follow_up_days: days });
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase">Max follow-ups</Label>
+                          <Input
+                            type="number" min={0} max={10}
+                            className="h-8 text-xs"
+                            value={c.max_follow_ups ?? (c.mode === "job_hunt" ? 1 : 3)}
+                            onChange={(e) => updateCampaign(c.id, { max_follow_ups: Math.max(0, parseInt(e.target.value || "0", 10)) } as any)}
+                          />
+                        </div>
                       </div>
 
                       <label className="flex items-center gap-2 text-xs">

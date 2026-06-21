@@ -10,7 +10,11 @@ const corsHeaders = {
 const json = (s: number, p: unknown) =>
   new Response(JSON.stringify(p), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-const INTENTS = ["interested", "question", "not_interested", "unsubscribe", "out_of_office", "auto_reply", "other"] as const;
+const INTENTS = [
+  "interested", "question", "not_interested", "unsubscribe", "out_of_office", "auto_reply", "other",
+  // Job-hunt specific (used when the lead belongs to a mode='job_hunt' campaign)
+  "job_interview", "job_rejection", "job_screening", "job_referral_request",
+] as const;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -33,13 +37,25 @@ Deno.serve(async (req) => {
     }
     if (!body) return json(400, { error: "no body" });
 
+    // Resolve whether this reply belongs to a job_hunt lead so the classifier can use job-specific intents.
+    let isJobHunt = false;
+    if (lid) {
+      const { data: l } = await supabase
+        .from("leads").select("campaigns:campaign_id(mode)").eq("id", lid).maybeSingle();
+      isJobHunt = (l as any)?.campaigns?.mode === "job_hunt";
+    }
+
+    const sysPrompt = isJobHunt
+      ? `Classify the intent of this reply to a JOB APPLICATION. Choose ONE: job_interview (they want to schedule a call/interview), job_screening (they ask screening questions or want a screener task), job_rejection (declined / position filled), job_referral_request (they suggest applying elsewhere), interested, question, not_interested, unsubscribe, out_of_office, auto_reply, other. Also write a one-sentence summary.`
+      : `Classify the intent of this reply to a cold sales pitch. Choose ONE: ${INTENTS.filter((i) => !i.startsWith("job_")).join(", ")}. Also write a one-sentence summary.`;
+
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "google/gemini-2.5-flash-lite",
         messages: [
-          { role: "system", content: `Classify the intent of this reply to a cold sales pitch. Choose ONE: ${INTENTS.join(", ")}. Also write a one-sentence summary.` },
+          { role: "system", content: sysPrompt },
           { role: "user", content: body.slice(0, 4000) },
         ],
         tools: [{
@@ -69,8 +85,8 @@ Deno.serve(async (req) => {
 
     if (lid) {
       const newStatus =
-        intent === "interested" || intent === "question" ? "replied" :
-        intent === "not_interested" || intent === "unsubscribe" ? "lost" : null;
+        intent === "interested" || intent === "question" || intent === "job_interview" || intent === "job_screening" ? "replied" :
+        intent === "not_interested" || intent === "unsubscribe" || intent === "job_rejection" ? "lost" : null;
       const updates: Record<string, unknown> = {
         reply_intent: intent,
         last_activity_at: new Date().toISOString(),
@@ -83,7 +99,7 @@ Deno.serve(async (req) => {
         event_type: "replied",
         channel: "email",
         provider: "classifier",
-        payload: { intent, summary },
+        payload: { intent, summary, is_job_hunt: isJobHunt },
       });
     }
     return json(200, { intent, summary });

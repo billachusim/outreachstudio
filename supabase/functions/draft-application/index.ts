@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You write concise, role-specific job applications for a senior software engineer. No fluff, no flattery, no generic AI phrases. Return STRICT JSON only." },
+          { role: "system", content: "You write concise, human-sounding job applications for a senior software engineer applying directly (not as a vendor). Sound like a person, not a sales pitch. No flattery, no 'I'm excited to', no generic AI phrases ('passionate about', 'cutting-edge', 'leverage', 'in today's fast-paced'), no marketing voice. Plain prose. Return STRICT JSON only." },
           { role: "user", content:
 `CANDIDATE PROFILE:
 ${profile.slice(0, 3500)}
@@ -84,9 +84,9 @@ ${fullDescription.slice(0, 4500)}
 
 Write an application. Return JSON:
 {
-  "subject": "string (subject line if emailing, < 80 chars, include role + name)",
-  "cover_letter": "string (<= 220 words, plain prose, addresses 2-3 specific requirements from the JD, ends with availability + a clear ask)",
-  "tailored_bullets": ["3-5 resume bullets, each <= 25 words, framed to match THIS role"]
+  "subject": "string — format exactly: 'Application: <Role Title> — <Candidate Name>'. Use the role from the job posting and the candidate's name from the profile. Plain. No emoji.",
+  "cover_letter": "string (<= 200 words, 3-4 short paragraphs, plain prose. Para 1: one line on who I am + why this role. Para 2-3: address 2-3 specific requirements from THIS JD with concrete prior work. Final line: availability + ask (intro call). Sign with first name only.)",
+  "tailored_bullets": ["3-5 resume bullets, each <= 22 words, framed to match THIS role. Numbers > adjectives. No 'spearheaded' / 'leveraged'."]
 }` },
         ],
         response_format: { type: "json_object" },
