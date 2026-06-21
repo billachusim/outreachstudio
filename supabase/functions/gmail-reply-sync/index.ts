@@ -161,7 +161,7 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Fallback: match on from address
+        // Fallback 1: exact from-address match against leads.contact_email
         if (!lead) {
           const cleanFrom = fromAddr.trim().toLowerCase();
           const { data: leadRow } = await supabase
@@ -174,6 +174,48 @@ Deno.serve(async (req) => {
             matchedByEmail++;
           }
         }
+
+        // Fallback 2: same-domain auto-reply
+        // (e.g. noreply@covenantuniversity.edu.ng ↔ registrar@covenantuniversity.edu.ng)
+        // Pick the most recently-pitched lead whose contact_email ends with the same domain.
+        if (!lead) {
+          const fromDomain = fromAddr.split("@")[1]?.toLowerCase() ?? "";
+          if (fromDomain && fromDomain.includes(".")) {
+            const { data: domainLead } = await supabase
+              .from("leads")
+              .select("id, user_id, campaign_id, last_activity_at")
+              .ilike("contact_email", `%@${fromDomain}`)
+              .order("last_activity_at", { ascending: false, nullsFirst: false })
+              .limit(1).maybeSingle();
+            if (domainLead) {
+              lead = { id: domainLead.id, user_id: domainLead.user_id, campaign_id: domainLead.campaign_id };
+              matchedByEmail++;
+            }
+          }
+        }
+
+        // Fallback 3: subject match against a recent pitch
+        // ("Re: <original subject>" survives most auto-replies even when
+        // threading headers are stripped).
+        if (!lead && subject) {
+          const cleanSubject = subject.replace(/^\s*(re|fwd|fw):\s*/i, "").trim();
+          if (cleanSubject.length > 5) {
+            const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+            const { data: subjMatch } = await supabase
+              .from("pitches")
+              .select("lead_id, user_id, leads:lead_id(id, user_id, campaign_id)")
+              .ilike("subject", cleanSubject)
+              .gte("sent_at", cutoff)
+              .order("sent_at", { ascending: false })
+              .limit(1).maybeSingle();
+            const l = (subjMatch as any)?.leads;
+            if (l) {
+              lead = { id: l.id, user_id: l.user_id, campaign_id: l.campaign_id };
+              matchedByEmail++;
+            }
+          }
+        }
+
 
         if (!lead) { skipped++; continue; }
 
