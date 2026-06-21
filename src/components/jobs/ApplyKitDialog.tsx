@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -9,6 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Copy, ExternalLink, Wand2, AlertCircle, Plus, Mail } from "lucide-react";
 import { toast } from "sonner";
+
+const JOB_PROFILE_SLUG = "job-application-profile";
+const JOB_PROFILE_TITLE = "Job application profile";
+
 
 export type ApplicationKit = {
   apply_method?: "form" | "email" | "external_ats";
@@ -50,29 +55,60 @@ export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
     copy(blob, "All answers");
   };
 
-  const addToProfile = async (item: { field: string; profile_question?: string }) => {
+  const addToProfile = async (item: { field: string; why?: string; profile_question?: string }) => {
     if (!user) return;
     setSavingField(item.field);
     try {
       const { data: existing } = await supabase.from("agent_memories")
-        .select("id, content").eq("user_id", user.id).eq("slug", "freelance-senior-engineer").maybeSingle();
-      const addendum = `\n\n## ${item.field}\n${item.profile_question || ""}\n(TODO: fill in)`;
+        .select("id, content")
+        .eq("user_id", user.id)
+        .eq("slug", JOB_PROFILE_SLUG)
+        .maybeSingle();
+
+      const heading = `## ${item.field}`;
+      // Dedupe: skip if same field already recorded
+      if (existing?.content?.includes(heading)) {
+        toast.info(`"${item.field}" is already in your job profile`, {
+          action: { label: "Open Memory", onClick: () => window.location.assign("/memory") },
+        });
+        return;
+      }
+
+      const block = [
+        heading,
+        item.profile_question ? `_Question:_ ${item.profile_question}` : "",
+        item.why ? `_Why we need it:_ ${item.why}` : "",
+        `**Answer:** _(TODO — fill in)_`,
+      ].filter(Boolean).join("\n");
+
       if (existing) {
         await supabase.from("agent_memories")
-          .update({ content: (existing.content ?? "") + addendum })
+          .update({ content: `${existing.content ?? ""}\n\n${block}` })
           .eq("id", existing.id);
       } else {
         await supabase.from("agent_memories").insert({
           user_id: user.id,
-          slug: "freelance-senior-engineer",
-          title: "Freelance senior engineer",
-          content: `# Profile\n${addendum}`,
+          slug: JOB_PROFILE_SLUG,
+          title: JOB_PROFILE_TITLE,
+          kind: "portfolio",
+          content:
+`# Job application profile
+
+Fields the Apply Assistant has needed across job applications.
+Fill in the answers under each heading — once answered, the assistant will reuse them automatically.
+
+${block}`,
         });
       }
-      toast.success(`Added "${item.field}" to profile`, { description: "Open Memory to fill in the value." });
+      toast.success(`Added "${item.field}" to job profile`, {
+        description: "Open Memory → Job application profile to fill in the answer.",
+        action: { label: "Open Memory", onClick: () => window.location.assign("/memory") },
+      });
     } catch (e: any) {
       toast.error(e?.message || "Save failed");
     } finally { setSavingField(null); }
+  };
+
   };
 
   if (!kit) return null;
