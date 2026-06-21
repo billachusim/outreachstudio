@@ -187,6 +187,7 @@ export const JobSourcesPanel = () => {
                       <Badge variant="outline" className="text-[10px] capitalize">{s.kind.replace("_", " ")}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{s.url}</p>
+                    {scanSummary(s.name)}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <Switch checked={s.enabled} onCheckedChange={() => toggle(s)} />
