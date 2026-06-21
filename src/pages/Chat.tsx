@@ -98,7 +98,7 @@ const Chat = () => {
   return (
     <div className="flex h-[calc(100dvh-3.5rem-4rem)] flex-col md:h-[calc(100dvh-3.5rem)]">
       {/* Top bar */}
-      <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 sm:px-4">
+      <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-3 py-2 sm:px-4">
         <div className="flex items-center gap-2 min-w-0">
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <Sparkles className="h-3.5 w-3.5" />
@@ -111,7 +111,7 @@ const Chat = () => {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto w-full max-w-3xl px-3 py-4 sm:px-6 sm:py-6">
           {empty ? (
             <div className="flex min-h-[50vh] flex-col items-center justify-center gap-5 text-center">
@@ -175,7 +175,7 @@ const Chat = () => {
 
       {/* Composer */}
       <div
-        className="border-t border-border/60 bg-background px-3 pb-3 pt-2 sm:px-4 sm:pb-4"
+        className="shrink-0 border-t border-border/60 bg-background px-3 pb-3 pt-2 sm:px-4 sm:pb-4"
         style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
         <div className="mx-auto w-full max-w-3xl">
