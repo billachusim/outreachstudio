@@ -112,8 +112,6 @@ Write an application. Return JSON:
         lead_id: lead.id,
         subject: out.subject || `Application: ${job.title}`,
         body: fullBody,
-        status: "draft",
-        channel: job.apply_email ? "email" : "manual",
       }).select("id").single();
       if (!error && pitch) pitchId = pitch.id;
     }
