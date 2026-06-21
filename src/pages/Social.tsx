@@ -24,7 +24,7 @@ type ChannelAccount = { channel: string };
 
 const platformMeta: Record<Platform, { label: string; icon: any; postFn: string }> = {
   x: { label: "X", icon: Twitter, postFn: "post-x" },
-  linkedin: { label: "LinkedIn", icon: Linkedin, postFn: "" }, // no LinkedIn function yet
+  linkedin: { label: "LinkedIn", icon: Linkedin, postFn: "post-linkedin" },
   instagram: { label: "Instagram", icon: Instagram, postFn: "post-instagram" },
 };
 
@@ -79,21 +79,25 @@ const Social = () => {
     const meta = platformMeta[d.platform];
     if (!meta.postFn) return toast.error("Auto-posting for this platform not yet wired");
     if (!isPlatformConnected(d.platform)) {
-      return toast.error(`Connect a ${meta.label} channel first`);
+      return toast.error(`Connect ${meta.label} first from the Channels page`);
     }
     setPosting(d.id);
-    const payload = d.platform === "instagram"
-      ? { caption: d.body, image_url: "" }
-      : { text: d.body };
+    const payload: Record<string, unknown> =
+      d.platform === "instagram" ? { caption: d.body, imageUrl: "" } :
+      d.platform === "linkedin" ? { text: d.body, draftId: d.id } :
+      { text: d.body };
     const { data, error } = await supabase.functions.invoke(meta.postFn, { body: payload });
     setPosting(null);
     if (error) return toast.error(error.message);
     if ((data as any)?.error) return toast.error((data as any).error);
-    await supabase.from("social_drafts").update({
-      status: "posted",
-      posted_at: new Date().toISOString(),
-      provider_post_id: (data as any)?.id ?? (data as any)?.tweet_id ?? null,
-    }).eq("id", d.id);
+    // post-linkedin already updates the draft itself.
+    if (d.platform !== "linkedin") {
+      await supabase.from("social_drafts").update({
+        status: "posted",
+        posted_at: new Date().toISOString(),
+        provider_post_id: (data as any)?.id ?? (data as any)?.tweet_id ?? null,
+      }).eq("id", d.id);
+    }
     toast.success(`Posted to ${meta.label}`);
     load();
   };
