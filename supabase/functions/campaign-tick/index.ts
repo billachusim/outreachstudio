@@ -619,7 +619,6 @@ Notes: ${lead.notes ?? ""}`;
       }
 
       if (!allowedToday.has(campaign.id)) {
-        const myScore = scoreMapPeek(supabase); // placeholder, see below
         await logEvent(
           "info",
           `Priority gate: "${campaign.name}" not in today's top ${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY} (by intel score). Pausing until tomorrow.`,
@@ -627,6 +626,7 @@ Notes: ${lead.notes ?? ""}`;
         await updateRun({ state: "paused" as never, error: `Lower priority than today's top ${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY} campaigns. Resumes tomorrow.` });
         return json(200, { ok: true, paused: true });
       }
+
 
 
       // Find highest-score drafted lead with a pitch + email
