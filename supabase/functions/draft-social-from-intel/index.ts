@@ -11,7 +11,7 @@ const corsHeaders = {
 const json = (s: number, p: unknown) =>
   new Response(JSON.stringify(p), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-type Platform = "x" | "linkedin" | "instagram";
+type Platform = "x" | "linkedin" | "instagram" | "telegram";
 interface Body { intelItemId?: string; platform?: Platform; force?: boolean; }
 
 function platformGuide(p: Platform): string {
@@ -19,6 +19,7 @@ function platformGuide(p: Platform): string {
     case "x": return "X / Twitter post: under 270 chars, punchy, one strong angle, optionally end with the article URL. No hashtag spam (max 2).";
     case "linkedin": return "LinkedIn post: 100-180 words, hook in first line, share a perspective or insight on the news, end with a soft question to invite engagement. No hashtag spam.";
     case "instagram": return "Instagram caption: 80-150 words, conversational, line breaks for readability, 3-5 relevant hashtags at the end.";
+    case "telegram": return "Telegram broadcast: 40-120 words, news-anchor tone, lead with the headline angle, end with the article URL on its own line. Use light <b>HTML</b> formatting if useful. No hashtags.";
   }
 }
 
@@ -117,8 +118,8 @@ Deno.serve(async (req) => {
     }
 
     // Single item mode (user)
-    if (!platform || !["x", "linkedin", "instagram"].includes(platform))
-      return json(400, { error: "platform required (x|linkedin|instagram)" });
+    if (!platform || !["x", "linkedin", "instagram", "telegram"].includes(platform))
+      return json(400, { error: "platform required (x|linkedin|instagram|telegram)" });
 
     const authHeader = req.headers.get("Authorization") ?? "";
     const supabase = createClient(
