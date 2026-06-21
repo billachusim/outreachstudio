@@ -26,6 +26,27 @@ export const JobSourcesPanel = () => {
   const [kind, setKind] = useState<Kind>("job_board");
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [lastScans, setLastScans] = useState<Record<string, { fetched: number; kept_new: number; level: string; at: string }>>({});
+
+  const loadDiagnostics = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("run_events")
+      .select("level, message, created_at")
+      .eq("user_id", user.id)
+      .eq("kind", "scan_jobs")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    const map: Record<string, { fetched: number; kept_new: number; level: string; at: string }> = {};
+    for (const ev of (data ?? []) as Array<{ level: string; message: string; created_at: string }>) {
+      const m = ev.message.match(/^source:(.+?)\s+fetched=(\d+)\s+kept_new=(\d+)/);
+      if (!m) continue;
+      const nm = m[1].trim();
+      if (map[nm]) continue; // keep most recent
+      map[nm] = { fetched: Number(m[2]), kept_new: Number(m[3]), level: ev.level, at: ev.created_at };
+    }
+    setLastScans(map);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -36,6 +57,7 @@ export const JobSourcesPanel = () => {
     if (error) toast.error(error.message);
     setSources((data as Source[]) ?? []);
     setLoading(false);
+    loadDiagnostics();
   };
 
   useEffect(() => { load(); }, [user?.id]);
