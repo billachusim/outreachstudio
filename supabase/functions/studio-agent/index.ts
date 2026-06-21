@@ -117,6 +117,11 @@ const TOOLS = [
   { type: "function", function: { name: "get_job_post", description: "Get full detail of a single job post including description, apply email/url, and any drafted application.", parameters: { type: "object", properties: { job_post_id: { type: "string" } }, required: ["job_post_id"], additionalProperties: false } } },
   { type: "function", function: { name: "scan_jobs_now", description: "Trigger an immediate scan of all configured job_board intel sources + the defaults (Remote OK, We Work Remotely). Runs in the background and inserts new job_posts + leads.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "draft_application", description: "Draft a tailored cover letter + resume bullets for a job_post. Saves the result as a pitch on the linked lead.", parameters: { type: "object", properties: { job_post_id: { type: "string" } }, required: ["job_post_id"], additionalProperties: false } } },
+
+  // --- Daily email budget (100/day Resend cap, split between outreach + job_hunt) ---
+  { type: "function", function: { name: "get_email_budget", description: "Get today's email budget split (outreach vs job_hunt caps + how many have been sent of each). Hard global ceiling is 100/day on Resend free tier.", parameters: { type: "object", properties: { date: { type: "string", description: "ISO date YYYY-MM-DD. Defaults to today." } }, additionalProperties: false } } },
+  { type: "function", function: { name: "set_email_budget", description: "Override today's email budget split between outreach and job_hunt. Total must be <= 100. Marks the row as 'override' so the morning auto-allocator won't clobber it.", parameters: { type: "object", properties: { outreach_cap: { type: "number", description: "Reserved for paid client / Tech Faculty outreach. 0-100." }, jobhunt_cap: { type: "number", description: "Reserved for freelance job applications. 0-100." }, date: { type: "string", description: "ISO date YYYY-MM-DD. Defaults to today." } }, required: ["outreach_cap", "jobhunt_cap"], additionalProperties: false } } },
+  { type: "function", function: { name: "reallocate_email_budget", description: "Re-run the auto-allocator that decides outreach vs job_hunt split based on today's intel + job_post signal. Clears any manual override.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
 ];
 
 async function executeTool(name: string, args: any, ctx: { supabase: any; userId: string; tickUrl: string; serviceKey: string; supaUrl: string; authHeader: string }) {
@@ -492,6 +497,66 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
     }
     case "draft_application": {
       const r = await invoke("draft-application", { job_post_id: args.job_post_id });
+      return r;
+    }
+
+    // ---------- Email budget ----------
+    case "get_email_budget": {
+      const date = args?.date ?? new Date().toISOString().slice(0, 10);
+      const { data } = await supabase
+        .from("email_budgets")
+        .select("date, outreach_cap, jobhunt_cap, outreach_sent, jobhunt_sent, notes")
+        .eq("user_id", userId).eq("date", date).maybeSingle();
+      // Live recount from pitches (truth)
+      const startOfDay = new Date(date + "T00:00:00.000Z").toISOString();
+      const endOfDay = new Date(new Date(startOfDay).getTime() + 86400000).toISOString();
+      const { data: pitches } = await supabase
+        .from("pitches")
+        .select("id, leads!inner(campaigns!inner(mode))")
+        .eq("user_id", userId)
+        .gte("sent_at", startOfDay).lt("sent_at", endOfDay);
+      let live_outreach = 0, live_jobhunt = 0;
+      for (const p of (pitches ?? []) as any[]) {
+        const m = p.leads?.campaigns?.mode;
+        if (m === "job_hunt") live_jobhunt++; else live_outreach++;
+      }
+      return {
+        date,
+        outreach_cap: data?.outreach_cap ?? 60,
+        jobhunt_cap: data?.jobhunt_cap ?? 25,
+        outreach_sent: live_outreach,
+        jobhunt_sent: live_jobhunt,
+        notes: data?.notes ?? null,
+        global_cap: 100,
+        global_sent: live_outreach + live_jobhunt,
+        global_remaining: Math.max(0, 100 - (live_outreach + live_jobhunt)),
+      };
+    }
+    case "set_email_budget": {
+      const date = args?.date ?? new Date().toISOString().slice(0, 10);
+      const outreach = Math.max(0, Math.min(100, Number(args.outreach_cap) || 0));
+      const jobhunt = Math.max(0, Math.min(100, Number(args.jobhunt_cap) || 0));
+      if (outreach + jobhunt > 100) return { error: `Total must be <= 100 (got ${outreach + jobhunt}). Resend free tier caps at 100/day.` };
+      const { data: existing } = await supabase.from("email_budgets")
+        .select("id").eq("user_id", userId).eq("date", date).maybeSingle();
+      if (existing) {
+        await supabase.from("email_budgets").update({
+          outreach_cap: outreach, jobhunt_cap: jobhunt, notes: "override",
+        }).eq("id", existing.id);
+      } else {
+        await supabase.from("email_budgets").insert({
+          user_id: userId, date, outreach_cap: outreach, jobhunt_cap: jobhunt,
+          outreach_sent: 0, jobhunt_sent: 0, notes: "override",
+        });
+      }
+      return { ok: true, date, outreach_cap: outreach, jobhunt_cap: jobhunt, note: "override (auto-allocator will skip this row)" };
+    }
+    case "reallocate_email_budget": {
+      // Clear override marker, then invoke allocator for this user.
+      const date = new Date().toISOString().slice(0, 10);
+      await supabase.from("email_budgets")
+        .update({ notes: null }).eq("user_id", userId).eq("date", date);
+      const r = await invoke("allocate-email-budget", { user_id: userId });
       return r;
     }
 
