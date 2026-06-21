@@ -18,6 +18,7 @@ import {
   fetchUserRegion,
   firecrawlLocationParam,
 } from "../_shared/enrichment.ts";
+import { checkBudget } from "../_shared/email-budget.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,7 +147,7 @@ Deno.serve(async (req) => {
     // Load campaign
     const { data: campaign } = await supabase
       .from("campaigns")
-      .select("id, name, city, category, keywords, discovery_source, channel, email_cap, whatsapp_cap, social_cap, follow_up_days, auto_followup, offering_id")
+      .select("id, name, city, category, keywords, discovery_source, channel, email_cap, whatsapp_cap, social_cap, follow_up_days, auto_followup, offering_id, mode")
       .eq("id", run.campaign_id)
       .maybeSingle();
     if (!campaign) return await fail("Campaign deleted");
@@ -156,6 +157,7 @@ Deno.serve(async (req) => {
       channelKey === "whatsapp" ? (campaign as any).whatsapp_cap :
       (campaign as any).social_cap;
     const effectiveCap = Math.min(run.daily_send_cap, channelCap ?? run.daily_send_cap);
+    const campaignMode: "job_hunt" | "outreach" = ((campaign as any).mode === "job_hunt") ? "job_hunt" : "outreach";
     const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? "";
 
     // STATE: queued -> discovering (just transition + log)
@@ -546,21 +548,24 @@ Notes: ${lead.notes ?? ""}`;
 
     // STATE: sending — pick highest-score 'drafted' lead with an unsent pitch, send via Resend
     if (run.state === "sending") {
-      // Daily cap check (per user) — Resend free tier: 100/day, 3000/month.
-      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-      const { count: sentToday } = await supabase
-        .from("pitches").select("id", { count: "exact", head: true })
-        .eq("user_id", run.user_id).gte("sent_at", startOfDay.toISOString());
-
-      const GLOBAL_DAILY_CAP = 100;
-      if ((sentToday ?? 0) >= GLOBAL_DAILY_CAP) {
-        await logEvent("info", `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Pausing for today.`);
-        await updateRun({ state: "paused" as never, error: `Global daily cap reached (${sentToday}/${GLOBAL_DAILY_CAP}). Resumes tomorrow.` });
+      // Bucket-aware daily budget (outreach vs job_hunt). Source of truth: email_budgets.
+      const budget = await checkBudget(supabase, run.user_id, campaignMode);
+      if (!budget.ok) {
+        await logEvent("info", `Pausing — ${budget.reason}.`);
+        await updateRun({ state: "paused" as never, error: `${budget.reason}. Resumes tomorrow.` });
         return json(200, { ok: true, paused: true });
       }
 
-      if ((sentToday ?? 0) >= effectiveCap) {
-        await logEvent("info", `Daily ${channelKey} cap reached (${sentToday}/${effectiveCap}). Pausing for today.`);
+      // Per-campaign channel cap still applies (a single noisy campaign shouldn't drain its bucket).
+      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      const { count: sentTodayThisCampaign } = await supabase
+        .from("pitches")
+        .select("id, leads!inner(campaign_id)", { count: "exact", head: true })
+        .eq("user_id", run.user_id)
+        .eq("leads.campaign_id", campaign.id)
+        .gte("sent_at", startOfDay.toISOString());
+      if ((sentTodayThisCampaign ?? 0) >= effectiveCap) {
+        await logEvent("info", `Daily ${channelKey} cap reached for this campaign (${sentTodayThisCampaign}/${effectiveCap}). Pausing for today.`);
         await updateRun({ state: "paused" as never, error: "Daily cap reached" });
         return json(200, { ok: true, paused: true });
       }
