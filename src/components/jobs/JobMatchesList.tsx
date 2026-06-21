@@ -92,6 +92,34 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
     finally { setDraftingId(null); }
   };
 
+  const runApplyAssistant = async (job: JobPost) => {
+    setApplyingId(job.id);
+    setKitJob(job);
+    setKit(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("apply-assistant", { body: { job_post_id: job.id } });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || "Apply Assistant failed");
+      setKit(data.kit as ApplicationKit);
+      await load();
+      onChanged?.();
+    } catch (e: any) {
+      toast.error(e?.message || "Apply Assistant failed");
+      setKitJob(null);
+    } finally { setApplyingId(null); }
+  };
+
+  const openExistingKit = async (job: JobPost) => {
+    const { data } = await supabase.from("job_posts")
+      .select("application_kit").eq("id", job.id).maybeSingle();
+    if (data?.application_kit) {
+      setKitJob(job);
+      setKit(data.application_kit as ApplicationKit);
+    } else {
+      runApplyAssistant(job);
+    }
+  };
+
   const copy = async (txt: string, label: string) => {
     try { await navigator.clipboard.writeText(txt); toast.success(`${label} copied`); }
     catch { toast.error("Copy failed"); }
