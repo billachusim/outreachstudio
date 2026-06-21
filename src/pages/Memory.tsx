@@ -20,7 +20,8 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { Pencil, Plus, RefreshCw, Trash2, Brain, Sparkles, BookOpen, ChevronDown, Search, Lightbulb, Globe2 } from "lucide-react";
-import { CvUploadCard } from "@/components/CvUploadCard";
+import { Link } from "react-router-dom";
+import { Briefcase } from "lucide-react";
 
 const STARTER_SLUGS = ["identity", "personality", "portfolio", "playbook", "learning-loop"];
 
@@ -299,7 +300,17 @@ const Memory = () => {
         />
       </div>
 
-      <CvUploadCard />
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Briefcase className="h-4 w-4" />
+            CV upload &amp; job-hunt features moved to the <strong>Jobs</strong> page.
+          </div>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/jobs?tab=cv">Open Jobs → CV &amp; Tailor</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">

@@ -564,6 +564,8 @@ export type Database = {
           source: string | null
           status: string
           tags: string[] | null
+          tailored_cv_md: string | null
+          tailored_cv_updated_at: string | null
           title: string
           updated_at: string
           url: string
@@ -584,6 +586,8 @@ export type Database = {
           source?: string | null
           status?: string
           tags?: string[] | null
+          tailored_cv_md?: string | null
+          tailored_cv_updated_at?: string | null
           title: string
           updated_at?: string
           url: string
@@ -604,6 +608,8 @@ export type Database = {
           source?: string | null
           status?: string
           tags?: string[] | null
+          tailored_cv_md?: string | null
+          tailored_cv_updated_at?: string | null
           title?: string
           updated_at?: string
           url?: string
@@ -1017,6 +1023,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          base_cv_md: string | null
           created_at: string
           display_name: string | null
           id: string
@@ -1026,6 +1033,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          base_cv_md?: string | null
           created_at?: string
           display_name?: string | null
           id?: string
@@ -1035,6 +1043,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          base_cv_md?: string | null
           created_at?: string
           display_name?: string | null
           id?: string
