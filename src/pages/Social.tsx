@@ -89,20 +89,25 @@ const Social = () => {
       d.platform === "linkedin" ? { text: d.body, draftId: d.id } :
       d.platform === "telegram" ? { text: d.body, draftId: d.id } :
       { text: d.body };
-    const { data, error } = await supabase.functions.invoke(meta.postFn, { body: payload });
-    setPosting(null);
-    if (error) return toast.error(error.message);
-    if ((data as any)?.error) return toast.error((data as any).error);
-    // post-linkedin & post-telegram already update the draft themselves.
-    if (d.platform !== "linkedin" && d.platform !== "telegram") {
-      await supabase.from("social_drafts").update({
-        status: "posted",
-        posted_at: new Date().toISOString(),
-        provider_post_id: (data as any)?.id ?? (data as any)?.tweet_id ?? null,
-      }).eq("id", d.id);
+    try {
+      const { data, error } = await supabase.functions.invoke(meta.postFn, { body: payload });
+      if (error) return toast.error(error.message);
+      if ((data as any)?.error) return toast.error((data as any).error);
+      // post-linkedin & post-telegram already update the draft themselves.
+      if (d.platform !== "linkedin" && d.platform !== "telegram") {
+        await supabase.from("social_drafts").update({
+          status: "posted",
+          posted_at: new Date().toISOString(),
+          provider_post_id: (data as any)?.id ?? (data as any)?.tweet_id ?? (data as any)?.providerId ?? null,
+        }).eq("id", d.id);
+      }
+      toast.success(`Posted to ${meta.label}`);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : `Could not post to ${meta.label}`);
+    } finally {
+      setPosting(null);
     }
-    toast.success(`Posted to ${meta.label}`);
-    load();
   };
 
   const isPlatformConnected = (p: Platform) => {

@@ -49,6 +49,18 @@ function buildOAuth1Header(method: string, url: string, params: Record<string, s
     .map((k) => `${pctEncode(k)}="${pctEncode(oauth[k])}"`).join(", ");
 }
 
+function getXErrorMessage(data: Record<string, unknown>, status: number) {
+  const details = data?.details as Record<string, unknown> | undefined;
+  const reason = details?.reason ?? data?.reason;
+  if (status === 403 && reason === "client-not-enrolled") {
+    return "Your X app is still a standalone app. In the X Developer Portal, create or open a Project, attach this app to it, then regenerate the Access Token + Secret and reconnect X in Channels.";
+  }
+  if (status === 403) {
+    return "X rejected the post. Check that your app is attached to a Project, has Read and Write permissions, and that you regenerated the Access Token + Secret after changing permissions.";
+  }
+  return String(data?.detail || data?.title || `X API ${status}`);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -94,11 +106,12 @@ Deno.serve(async (req) => {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
+      const message = getXErrorMessage(data as Record<string, unknown>, resp.status);
       await supabase.from("channel_messages").insert({
         user_id: user.id, channel_account_id: acct.id, lead_id: b.leadId ?? null, campaign_id: b.campaignId ?? null,
-        channel: "x", direction: "outbound", body: b.text, status: "failed", error: JSON.stringify(data),
+        channel: "x", direction: "outbound", body: b.text, status: "failed", error: message,
       });
-      return json(resp.status, { error: data?.detail || data?.title || `X API ${resp.status}`, details: data });
+      return json(200, { ok: false, error: message, details: data, upstreamStatus: resp.status });
     }
 
     const providerId = data?.data?.id ?? null;
