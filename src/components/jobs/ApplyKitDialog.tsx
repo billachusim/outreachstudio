@@ -59,8 +59,13 @@ export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
     copy(blob, "All answers");
   };
 
-  const addToProfile = async (item: { field: string; why?: string; profile_question?: string }) => {
+  const addToProfile = async (
+    item: { field: string; why?: string; profile_question?: string },
+    answer: string,
+  ) => {
     if (!user) return;
+    const trimmed = answer.trim();
+    if (!trimmed) { toast.error("Enter a value first"); return; }
     setSavingField(item.field);
     try {
       const { data: existing } = await supabase.from("agent_memories")
@@ -70,24 +75,33 @@ export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
         .maybeSingle();
 
       const heading = `## ${item.field}`;
-      // Dedupe: skip if same field already recorded
-      if (existing?.content?.includes(heading)) {
-        toast.info(`"${item.field}" is already in your job profile`, {
-          action: { label: "Open Memory", onClick: () => window.location.assign("/memory") },
-        });
-        return;
-      }
-
       const block = [
         heading,
         item.profile_question ? `_Question:_ ${item.profile_question}` : "",
         item.why ? `_Why we need it:_ ${item.why}` : "",
-        `**Answer:** _(TODO — fill in)_`,
+        `**Answer:** ${trimmed}`,
       ].filter(Boolean).join("\n");
+
+      let newContent: string;
+      if (existing?.content?.includes(heading)) {
+        // Replace existing block for that heading (up to next ## or end)
+        const re = new RegExp(`${heading.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}[\\s\\S]*?(?=\\n## |$)`);
+        newContent = (existing.content ?? "").replace(re, block + "\n");
+      } else if (existing) {
+        newContent = `${existing.content ?? ""}\n\n${block}`;
+      } else {
+        newContent =
+`# Job application profile
+
+Fields the Apply Assistant has needed across job applications.
+Saved answers here are reused automatically on future applications.
+
+${block}`;
+      }
 
       if (existing) {
         await supabase.from("agent_memories")
-          .update({ content: `${existing.content ?? ""}\n\n${block}` })
+          .update({ content: newContent })
           .eq("id", existing.id);
       } else {
         await supabase.from("agent_memories").insert({
@@ -95,23 +109,25 @@ export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
           slug: JOB_PROFILE_SLUG,
           title: JOB_PROFILE_TITLE,
           kind: "portfolio",
-          content:
-`# Job application profile
-
-Fields the Apply Assistant has needed across job applications.
-Fill in the answers under each heading — once answered, the assistant will reuse them automatically.
-
-${block}`,
+          content: newContent,
         });
       }
-      toast.success(`Added "${item.field}" to job profile`, {
-        description: "Open Memory → Job application profile to fill in the answer.",
+      setSavedFields(prev => new Set(prev).add(item.field));
+      setOpenInput(null);
+      setInputValue("");
+      toast.success(`Saved "${item.field}" to job profile`, {
         action: { label: "Open Memory", onClick: () => window.location.assign("/memory") },
       });
     } catch (e: any) {
       toast.error(e?.message || "Save failed");
     } finally { setSavingField(null); }
   };
+
+  const startInput = (field: string) => {
+    setOpenInput(field);
+    setInputValue("");
+  };
+
 
   if (!kit) return null;
 
