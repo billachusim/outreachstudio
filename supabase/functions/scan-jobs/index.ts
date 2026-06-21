@@ -210,11 +210,52 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
     if (error) { console.error("scan-jobs insert:", error); continue; }
     totalJobs += inserted?.length ?? 0;
 
-    // Auto-create leads for score >= 60
+    // Auto-create leads for score >= 60 — but reuse an existing lead for the
+    // same company (by root_domain or business_name) so we don't email Stripe
+    // twice in a month. If reused, just attach the job_post_id.
     for (const jp of inserted ?? []) {
       if ((jp.score ?? 0) < 60) continue;
       let host: string | null = null;
       try { host = new URL(jp.url).hostname.replace(/^www\./, ""); } catch { /* */ }
+      const applyHost = jp.apply_email
+        ? jp.apply_email.split("@").pop()?.toLowerCase() ?? null
+        : null;
+      const candidateDomains = [host, applyHost].filter(Boolean) as string[];
+
+      // Try to find an existing lead for this company (within this user)
+      let existingLead: any = null;
+      if (candidateDomains.length > 0) {
+        const { data: byDomain } = await supabase
+          .from("leads").select("id, job_post_id, status")
+          .eq("user_id", userId)
+          .in("root_domain", candidateDomains)
+          .limit(1);
+        existingLead = byDomain?.[0] ?? null;
+      }
+      if (!existingLead && jp.company) {
+        const { data: byName } = await supabase
+          .from("leads").select("id, job_post_id, status")
+          .eq("user_id", userId)
+          .ilike("business_name", jp.company)
+          .limit(1);
+        existingLead = byName?.[0] ?? null;
+      }
+
+      if (existingLead) {
+        // Attach this job post to the existing lead only if it has none yet.
+        if (!existingLead.job_post_id) {
+          await supabase.from("leads")
+            .update({
+              job_post_id: jp.id,
+              notes: `Job: ${jp.title}${jp.company ? ` @ ${jp.company}` : ""} (existing company)`,
+              last_activity_at: new Date().toISOString(),
+            })
+            .eq("id", existingLead.id);
+        }
+        await supabase.from("job_posts").update({ status: "dedup_existing" }).eq("id", jp.id);
+        continue;
+      }
+
       const { error: lerr } = await supabase.from("leads").insert({
         user_id: userId,
         campaign_id: camp.id,
