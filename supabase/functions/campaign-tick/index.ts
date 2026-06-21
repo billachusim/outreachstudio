@@ -570,29 +570,34 @@ Notes: ${lead.notes ?? ""}`;
         return json(200, { ok: true, paused: true });
       }
 
-      // Concurrent-campaign quality gate: at most 3 campaigns may send per day.
-      // Ranking: campaigns already sending today keep their slot; remaining slots
-      // are filled by the highest intel relevance_score (campaigns spawned from
-      // top-priority intel win). Campaigns without intel get a baseline of 50.
-      const MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY = 3;
+      // Concurrent-campaign quality gate: per bucket. Outreach gets top-3,
+      // job-hunt gets top-2 (smaller bucket, prevents one board flooding).
+      const MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY =
+        campaignMode === "job_hunt" ? 2 : 3;
       const { data: todaysPitches } = await supabase
         .from("pitches")
-        .select("lead_id, leads!inner(campaign_id)")
+        .select("lead_id, leads!inner(campaign_id, campaigns!inner(mode))")
         .eq("user_id", run.user_id)
         .gte("sent_at", startOfDay.toISOString());
       const sentTodayCampaignIds = new Set<string>();
-      for (const p of (todaysPitches ?? []) as Array<{ leads: { campaign_id: string | null } | null }>) {
+      for (const p of (todaysPitches ?? []) as any[]) {
         const cid = p.leads?.campaign_id;
-        if (cid) sentTodayCampaignIds.add(cid);
+        const mode = p.leads?.campaigns?.mode === "job_hunt" ? "job_hunt" : "outreach";
+        if (cid && mode === campaignMode) sentTodayCampaignIds.add(cid);
       }
 
       const allowedToday = new Set<string>(sentTodayCampaignIds);
       if (allowedToday.size < MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY) {
         const { data: activeCamps } = await supabase
           .from("campaigns")
-          .select("id, created_at")
+          .select("id, created_at, mode")
           .eq("user_id", run.user_id)
           .eq("status", "active");
+        const sameMode = (activeCamps ?? []).filter((c: any) =>
+          (c.mode === "job_hunt" ? "job_hunt" : "outreach") === campaignMode
+        );
+        const activeIds = sameMode.map((c: any) => c.id);
+        const candidateIds = activeIds.filter((id: string) => !allowedToday.has(id));
         const activeIds = (activeCamps ?? []).map((c) => c.id);
         const candidateIds = activeIds.filter((id) => !allowedToday.has(id));
 
