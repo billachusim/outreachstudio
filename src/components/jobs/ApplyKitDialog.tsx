@@ -169,24 +169,72 @@ ${block}`;
               </Link>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Saved to a dedicated <span className="font-mono">job-application-profile</span> memory.
-              Fill in the answers there once and the assistant reuses them on future applications.
+              Enter the value and we'll save it to your <span className="font-mono">job-application-profile</span> memory and reuse it on future applications.
             </p>
 
             <div className="divide-y rounded-md border bg-muted/20">
-              {kit.missing_info.map((m, i) => (
-                <div key={i} className="flex items-start gap-2 p-2.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">{m.field}</div>
-                    {m.why && <div className="text-xs text-muted-foreground">{m.why}</div>}
-                    {m.profile_question && <div className="mt-1 text-xs italic text-muted-foreground">"{m.profile_question}"</div>}
+              {kit.missing_info.map((m, i) => {
+                const saved = savedFields.has(m.field);
+                const isOpen = openInput === m.field;
+                const multiline = /why|describe|cover|summary|reason|tell us|explain/i.test(
+                  `${m.field} ${m.profile_question ?? ""}`,
+                );
+                return (
+                  <div key={i} className="space-y-2 p-2.5">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium">{m.field}</div>
+                        {m.why && <div className="text-xs text-muted-foreground">{m.why}</div>}
+                        {m.profile_question && <div className="mt-1 text-xs italic text-muted-foreground">"{m.profile_question}"</div>}
+                      </div>
+                      {saved ? (
+                        <Badge variant="outline" className="h-6 gap-1 text-[10px]">
+                          <Check className="h-3 w-3" /> Saved
+                        </Badge>
+                      ) : !isOpen ? (
+                        <Button size="sm" variant="outline" className="h-7" onClick={() => startInput(m.field)}>
+                          <Plus className="h-3.5 w-3.5" /> Add
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    {isOpen && (
+                      <div className="flex items-start gap-2">
+                        {multiline ? (
+                          <Textarea
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            placeholder={m.profile_question || `Enter your ${m.field.toLowerCase()}`}
+                            rows={3}
+                            className="text-xs"
+                            autoFocus
+                          />
+                        ) : (
+                          <Input
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            placeholder={m.profile_question || `Enter your ${m.field.toLowerCase()}`}
+                            className="h-8 text-xs"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { e.preventDefault(); addToProfile(m, inputValue); }
+                              if (e.key === "Escape") { setOpenInput(null); setInputValue(""); }
+                            }}
+                          />
+                        )}
+                        <Button size="sm" className="h-8" disabled={savingField === m.field}
+                                onClick={() => addToProfile(m, inputValue)}>
+                          <Check className="h-3.5 w-3.5" /> Save
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-8"
+                                onClick={() => { setOpenInput(null); setInputValue(""); }}>
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                  <Button size="sm" variant="outline" className="h-7" disabled={savingField === m.field}
-                          onClick={() => addToProfile(m)}>
-                    <Plus className="h-3.5 w-3.5" /> Add to profile
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
