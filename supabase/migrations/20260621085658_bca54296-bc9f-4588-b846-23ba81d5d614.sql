@@ -1,0 +1,1 @@
+ALTER TABLE public.job_posts ADD COLUMN IF NOT EXISTS application_kit jsonb, ADD COLUMN IF NOT EXISTS application_kit_updated_at timestamptz;
