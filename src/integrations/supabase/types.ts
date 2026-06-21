@@ -557,6 +557,8 @@ export type Database = {
           company: string | null
           created_at: string
           description: string | null
+          draft: Json | null
+          draft_updated_at: string | null
           id: string
           location: string | null
           matched_offering_id: string | null
@@ -581,6 +583,8 @@ export type Database = {
           company?: string | null
           created_at?: string
           description?: string | null
+          draft?: Json | null
+          draft_updated_at?: string | null
           id?: string
           location?: string | null
           matched_offering_id?: string | null
@@ -605,6 +609,8 @@ export type Database = {
           company?: string | null
           created_at?: string
           description?: string | null
+          draft?: Json | null
+          draft_updated_at?: string | null
           id?: string
           location?: string | null
           matched_offering_id?: string | null

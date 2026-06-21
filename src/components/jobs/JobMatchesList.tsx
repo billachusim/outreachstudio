@@ -7,9 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-} from "@/components/ui/dialog";
-import { Briefcase, RefreshCw, FileText, ExternalLink, Copy, Loader2, Search, Filter, Wand2 } from "lucide-react";
+  Briefcase, RefreshCw, FileText, ExternalLink, Copy, Loader2, Search, Filter, Wand2,
+  ChevronDown, ChevronRight, Mail,
+} from "lucide-react";
 import { toast } from "sonner";
 import { ApplyKitDialog, type ApplicationKit } from "./ApplyKitDialog";
 
@@ -26,14 +26,18 @@ type JobPost = {
   location: string | null;
   salary_text: string | null;
   created_at: string;
+  draft?: Draft | null;
+  draft_updated_at?: string | null;
+  application_kit?: ApplicationKit | null;
+  application_kit_updated_at?: string | null;
 };
 type Draft = {
-  job: JobPost;
   subject: string;
   cover_letter: string;
   tailored_bullets: string[];
-  apply_email: string | null;
-  apply_url: string | null;
+  apply_email?: string | null;
+  apply_url?: string | null;
+  pitch_id?: string | null;
 };
 
 export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
@@ -44,7 +48,7 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [kitJob, setKitJob] = useState<JobPost | null>(null);
   const [kit, setKit] = useState<ApplicationKit | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [minScore, setMinScore] = useState(60);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -52,7 +56,7 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
   const load = async () => {
     if (!user) return;
     const { data } = await supabase.from("job_posts")
-      .select("id, title, company, score, source, status, apply_email, apply_url, url, location, salary_text, created_at")
+      .select("id, title, company, score, source, status, apply_email, apply_url, url, location, salary_text, created_at, draft, draft_updated_at, application_kit, application_kit_updated_at")
       .eq("user_id", user.id)
       .order("score", { ascending: false })
       .order("created_at", { ascending: false })
@@ -78,43 +82,33 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
       const { data, error } = await supabase.functions.invoke("draft-application", { body: { job_post_id: job.id } });
       if (error) throw error;
       if (!data?.ok) throw new Error(data?.error || "Draft failed");
-      setDraft({
-        job,
-        subject: data.subject ?? `Application: ${job.title}`,
-        cover_letter: data.cover_letter ?? "",
-        tailored_bullets: data.tailored_bullets ?? [],
-        apply_email: data.apply_email ?? job.apply_email,
-        apply_url: data.apply_url ?? job.apply_url,
-      });
       await load();
+      setExpandedId(job.id);
       onChanged?.();
+      toast.success("Draft ready");
     } catch (e: any) { toast.error(e?.message || "Draft failed"); }
     finally { setDraftingId(null); }
   };
 
   const runApplyAssistant = async (job: JobPost) => {
     setApplyingId(job.id);
-    setKitJob(job);
-    setKit(null);
     try {
       const { data, error } = await supabase.functions.invoke("apply-assistant", { body: { job_post_id: job.id } });
       if (error) throw error;
       if (!data?.ok) throw new Error(data?.error || "Apply Assistant failed");
+      setKitJob(job);
       setKit(data.kit as ApplicationKit);
       await load();
       onChanged?.();
     } catch (e: any) {
       toast.error(e?.message || "Apply Assistant failed");
-      setKitJob(null);
     } finally { setApplyingId(null); }
   };
 
-  const openExistingKit = async (job: JobPost) => {
-    const { data } = await supabase.from("job_posts")
-      .select("application_kit").eq("id", job.id).maybeSingle();
-    if (data?.application_kit) {
+  const openKit = (job: JobPost) => {
+    if (job.application_kit) {
       setKitJob(job);
-      setKit(data.application_kit as ApplicationKit);
+      setKit(job.application_kit);
     } else {
       runApplyAssistant(job);
     }
@@ -135,7 +129,7 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
     });
   }, [posts, search, minScore, statusFilter]);
 
-  const fullBody = draft ? `${draft.cover_letter}\n\n— Highlights —\n${draft.tailored_bullets.map((b) => `• ${b}`).join("\n")}` : "";
+  const fmtDate = (s?: string | null) => s ? new Date(s).toLocaleString() : "";
 
   return (
     <>
@@ -187,87 +181,158 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
             </div>
           ) : (
             <div className="divide-y rounded-md border">
-              {filtered.map((p) => (
-                <div key={p.id} className="flex flex-wrap items-center gap-2 p-2.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium">{p.title}</span>
-                      <Badge variant="outline" className="text-[10px]">{p.score ?? 0}</Badge>
-                      {p.status === "drafted" && <Badge variant="secondary" className="text-[10px]">drafted</Badge>}
-                      {p.status === "stale" && <Badge variant="destructive" className="text-[10px]">stale</Badge>}
-                      {p.status === "sent" && <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[10px]">sent</Badge>}
+              {filtered.map((p) => {
+                const isOpen = expandedId === p.id;
+                const hasDraft = !!p.draft;
+                const hasKit = !!p.application_kit;
+                return (
+                  <div key={p.id} className="bg-background">
+                    {/* Row header — click to expand */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setExpandedId(isOpen ? null : p.id)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpandedId(isOpen ? null : p.id); } }}
+                      className="flex flex-wrap items-center gap-2 p-2.5 hover:bg-muted/40 cursor-pointer"
+                    >
+                      {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-medium">{p.title}</span>
+                          <Badge variant="outline" className="text-[10px]">{p.score ?? 0}</Badge>
+                          {p.status === "drafted" && <Badge variant="secondary" className="text-[10px]">drafted</Badge>}
+                          {p.status === "stale" && <Badge variant="destructive" className="text-[10px]">stale</Badge>}
+                          {p.status === "sent" && <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[10px]">sent</Badge>}
+                          {hasDraft && <Badge variant="outline" className="text-[10px]"><FileText className="h-2.5 w-2.5" /> draft</Badge>}
+                          {hasKit && <Badge variant="outline" className="text-[10px]"><Wand2 className="h-2.5 w-2.5" /> kit</Badge>}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {[p.company, p.location, p.salary_text, p.source].filter(Boolean).join(" · ")}
+                        </div>
+                      </div>
+                      <Button size="sm" variant="ghost" className="h-7" asChild onClick={(e) => e.stopPropagation()}>
+                        <a href={p.url} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" /></a>
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7"
+                              onClick={(e) => { e.stopPropagation(); hasDraft ? setExpandedId(p.id) : generateDraft(p); }}
+                              disabled={draftingId === p.id}>
+                        {draftingId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                        {hasDraft ? "View draft" : "Draft"}
+                      </Button>
+                      <Button size="sm" variant="default" className="h-7"
+                              onClick={(e) => { e.stopPropagation(); openKit(p); }}
+                              disabled={applyingId === p.id}
+                              title={hasKit ? "Open saved application kit" : "Scrape the listing and prep every form answer"}>
+                        {applyingId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                        {hasKit ? "View kit" : "Apply"}
+                      </Button>
                     </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {[p.company, p.location, p.salary_text, p.source].filter(Boolean).join(" · ")}
-                    </div>
+
+                    {/* Expanded panel */}
+                    {isOpen && (
+                      <div className="space-y-4 border-t bg-muted/20 p-3">
+                        {!hasDraft && !hasKit && (
+                          <div className="rounded-md border border-dashed bg-background p-4 text-center text-xs text-muted-foreground">
+                            Nothing saved yet. Click <span className="font-medium">Draft</span> for a tailored cover letter, or <span className="font-medium">Apply</span> to scrape the listing and prep every form answer.
+                          </div>
+                        )}
+
+                        {hasDraft && p.draft && (
+                          <div className="space-y-2 rounded-md border bg-background p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <FileText className="h-3.5 w-3.5" />
+                                <span className="text-sm font-semibold">Saved draft</span>
+                                <span className="text-[10px] text-muted-foreground">{fmtDate(p.draft_updated_at)}</span>
+                              </div>
+                              <Button size="sm" variant="ghost" className="h-7 text-[11px]"
+                                      onClick={() => generateDraft(p)} disabled={draftingId === p.id}>
+                                {draftingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                Re-draft
+                              </Button>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] text-muted-foreground">Subject</span>
+                                <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => copy(p.draft!.subject, "Subject")}>
+                                  <Copy className="h-3 w-3" /> Copy
+                                </Button>
+                              </div>
+                              <Input value={p.draft.subject} readOnly className="h-8 text-xs" />
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] text-muted-foreground">Cover letter + highlights</span>
+                                <Button size="sm" variant="ghost" className="h-6 text-[11px]"
+                                        onClick={() => copy(
+                                          `${p.draft!.cover_letter}\n\n— Highlights —\n${(p.draft!.tailored_bullets ?? []).map(b => `• ${b}`).join("\n")}`,
+                                          "Body")}>
+                                  <Copy className="h-3 w-3" /> Copy
+                                </Button>
+                              </div>
+                              <Textarea
+                                value={`${p.draft.cover_letter}\n\n— Highlights —\n${(p.draft.tailored_bullets ?? []).map(b => `• ${b}`).join("\n")}`}
+                                readOnly rows={12} className="font-mono text-xs"
+                              />
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              {(p.draft.apply_email || p.apply_email) && (
+                                <Button size="sm" variant="outline" asChild>
+                                  <a href={`mailto:${p.draft.apply_email || p.apply_email}`}><Mail className="h-3.5 w-3.5" /> Email</a>
+                                </Button>
+                              )}
+                              {(p.draft.apply_url || p.apply_url) && (
+                                <Button size="sm" asChild>
+                                  <a href={p.draft.apply_url || p.apply_url || "#"} target="_blank" rel="noreferrer">
+                                    Open apply page <ExternalLink className="h-3.5 w-3.5" />
+                                  </a>
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {hasKit && p.application_kit && (
+                          <div className="space-y-2 rounded-md border bg-background p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <Wand2 className="h-3.5 w-3.5" />
+                                <span className="text-sm font-semibold">Application kit</span>
+                                <span className="text-[10px] text-muted-foreground">{fmtDate(p.application_kit_updated_at)}</span>
+                              </div>
+                              <div className="flex gap-1">
+                                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => openKit(p)}>
+                                  Open
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-7 text-[11px]"
+                                        onClick={() => runApplyAssistant(p)} disabled={applyingId === p.id}>
+                                  {applyingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                  Re-run
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="grid gap-1 text-xs sm:grid-cols-3">
+                              <div><span className="text-muted-foreground">Method:</span> {p.application_kit.apply_method ?? "—"}</div>
+                              <div><span className="text-muted-foreground">Questions:</span> {p.application_kit.detected_questions?.length ?? 0}</div>
+                              <div><span className="text-muted-foreground">Missing:</span> {p.application_kit.missing_info?.length ?? 0}</div>
+                            </div>
+                            {p.application_kit.summary && (
+                              <p className="text-xs text-muted-foreground">{p.application_kit.summary}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <Button size="sm" variant="ghost" className="h-7" asChild>
-                    <a href={p.url} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" /></a>
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7" onClick={() => generateDraft(p)} disabled={draftingId === p.id}>
-                    {draftingId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                    {p.status === "drafted" ? "Re-draft" : "Draft"}
-                  </Button>
-                  <Button size="sm" variant="default" className="h-7"
-                          onClick={() => p.status === "drafted" ? openExistingKit(p) : runApplyAssistant(p)}
-                          disabled={applyingId === p.id}
-                          title="Scrape the listing and prep every form answer">
-                    {applyingId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                    Apply
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
       </Card>
-
-      <Dialog open={!!draft} onOpenChange={(o) => !o && setDraft(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="truncate">{draft?.job.title}</DialogTitle>
-            <DialogDescription className="truncate">
-              {[draft?.job.company, draft?.job.location, draft?.job.source].filter(Boolean).join(" · ")}
-            </DialogDescription>
-          </DialogHeader>
-          {draft && (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Subject</span>
-                  <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => copy(draft.subject, "Subject")}>
-                    <Copy className="h-3 w-3" /> Copy
-                  </Button>
-                </div>
-                <Input value={draft.subject} readOnly />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Cover letter + highlights</span>
-                  <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => copy(fullBody, "Body")}>
-                    <Copy className="h-3 w-3" /> Copy
-                  </Button>
-                </div>
-                <Textarea value={fullBody} readOnly rows={14} className="font-mono text-xs" />
-              </div>
-              {(draft.apply_email || draft.apply_url) && (
-                <div className="rounded-md border bg-muted/30 p-2 text-xs">
-                  {draft.apply_email && <div>Apply email: <span className="font-mono">{draft.apply_email}</span></div>}
-                  {draft.apply_url && <div className="truncate">Apply URL: <a className="underline" href={draft.apply_url} target="_blank" rel="noreferrer">{draft.apply_url}</a></div>}
-                </div>
-              )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDraft(null)}>Close</Button>
-            {draft?.apply_url && (
-              <Button asChild>
-                <a href={draft.apply_url} target="_blank" rel="noreferrer">Open apply page <ExternalLink className="h-3.5 w-3.5" /></a>
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <ApplyKitDialog
         open={!!kitJob}
