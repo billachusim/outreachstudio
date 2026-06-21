@@ -598,8 +598,6 @@ Notes: ${lead.notes ?? ""}`;
         );
         const activeIds = sameMode.map((c: any) => c.id);
         const candidateIds = activeIds.filter((id: string) => !allowedToday.has(id));
-        const activeIds = (activeCamps ?? []).map((c) => c.id);
-        const candidateIds = activeIds.filter((id) => !allowedToday.has(id));
 
         const scoreMap = new Map<string, number>();
         if (candidateIds.length > 0) {
