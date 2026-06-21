@@ -4,12 +4,17 @@ import remarkGfm from "remark-gfm";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Card } from "@/components/ui/card";
-import { Loader2, Send, Sparkles, Plus } from "lucide-react";
+import { Loader2, ArrowUp, Plus, Sparkles, Square } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Msg = { id: string; role: string; content: string; created_at: string };
+
+const SUGGESTIONS = [
+  "What's running right now?",
+  "Summarize today's pipeline",
+  "Draft a pitch for my warmest lead",
+  "Suggest one tweak to improve replies",
+];
 
 const Chat = () => {
   const { user } = useAuth();
@@ -19,18 +24,17 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { document.title = "Studio Agent · Outreach Studio"; }, []);
+  useEffect(() => { document.title = "Agent · Outreach Studio"; }, []);
 
-  // Get/create conversation
   useEffect(() => {
     if (!user) return;
     (async () => {
       const { data: convos } = await supabase
         .from("chat_conversations").select("id").order("updated_at", { ascending: false }).limit(1);
-      if (convos && convos.length > 0) {
-        setConversationId(convos[0].id);
-      } else {
+      if (convos && convos.length > 0) setConversationId(convos[0].id);
+      else {
         const { data: newC } = await supabase
           .from("chat_conversations").insert({ user_id: user.id, title: "New chat" }).select("id").single();
         if (newC) setConversationId(newC.id);
@@ -38,7 +42,6 @@ const Chat = () => {
     })();
   }, [user?.id]);
 
-  // Load messages
   useEffect(() => {
     if (!conversationId) return;
     (async () => {
@@ -49,17 +52,28 @@ const Chat = () => {
     })();
   }, [conversationId]);
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [messages, sending]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [messages, sending]);
+
+  // Auto-grow textarea
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+  }, [input]);
 
   const newConversation = async () => {
     if (!user) return;
     const { data } = await supabase.from("chat_conversations").insert({ user_id: user.id, title: "New chat" }).select("id").single();
-    if (data) { setConversationId(data.id); setMessages([]); }
+    if (data) { setConversationId(data.id); setMessages([]); setInput(""); taRef.current?.focus(); }
   };
 
-  const send = async () => {
-    if (!input.trim() || !conversationId || sending) return;
-    const text = input.trim();
+  const send = async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
+    if (!text || !conversationId || sending) return;
     setInput("");
     setSending(true);
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content: text, created_at: new Date().toISOString() }]);
@@ -75,69 +89,124 @@ const Chat = () => {
       toast({ title: "Agent error", description: e?.message ?? "Try again", variant: "destructive" });
     } finally {
       setSending(false);
+      setTimeout(() => taRef.current?.focus(), 0);
     }
   };
 
+  const empty = messages.length === 0;
+
   return (
-    <div className="container mx-auto flex h-[calc(100vh-3.5rem)] max-w-4xl flex-col p-3 sm:p-4">
-      <div className="flex items-center justify-between gap-2 pb-3">
+    <div className="flex h-[calc(100dvh-3.5rem-4rem)] flex-col md:h-[calc(100dvh-3.5rem)]">
+      {/* Top bar */}
+      <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 sm:px-4">
         <div className="flex items-center gap-2 min-w-0">
-          <Sparkles className="h-5 w-5 shrink-0 text-primary" />
-          <h1 className="truncate text-lg font-semibold sm:text-xl">Studio Agent</h1>
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <Sparkles className="h-3.5 w-3.5" />
+          </div>
+          <span className="truncate text-sm font-semibold">Studio Agent</span>
         </div>
-        <Button variant="outline" size="sm" onClick={newConversation}>
+        <Button variant="ghost" size="sm" onClick={newConversation} className="gap-1.5">
           <Plus className="h-4 w-4" /> <span className="hidden sm:inline">New chat</span>
         </Button>
       </div>
 
-      <Card ref={scrollRef as any} className="flex-1 overflow-y-auto p-4">
-        {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-            <Sparkles className="h-8 w-8" />
-            <p className="text-sm">Ask me to start a campaign, check progress, or list recent leads.</p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2 text-xs">
-              {["List my campaigns", "What's running right now?", "Show recent activity"].map((s) => (
-                <button key={s} onClick={() => setInput(s)} className="rounded-full border px-3 py-1 hover:bg-accent">{s}</button>
-              ))}
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-3 py-4 sm:px-6 sm:py-6">
+          {empty ? (
+            <div className="flex min-h-[50vh] flex-col items-center justify-center gap-5 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Sparkles className="h-7 w-7" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-xl font-semibold sm:text-2xl">How can I help today?</h2>
+                <p className="text-sm text-muted-foreground">
+                  Ask me about campaigns, leads, intel, social, channels, offerings, templates, or memory.
+                </p>
+              </div>
+              <div className="grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => send(s)}
+                    className="rounded-xl border border-border bg-card px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {messages.map((m) => (
-              <div key={m.id} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                  {m.role === "assistant" ? (
-                    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || "…"}</ReactMarkdown>
+          ) : (
+            <div className="space-y-5">
+              {messages.map((m) => (
+                <div key={m.id} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+                  {m.role === "user" ? (
+                    <div className="max-w-[85%] rounded-2xl bg-primary px-4 py-2.5 text-sm text-primary-foreground sm:max-w-[75%]">
+                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
                     </div>
-                  ) : m.content}
+                  ) : (
+                    <div className="flex w-full gap-3">
+                      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
+                        <div className="prose prose-sm max-w-none break-words dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-pre:my-2 prose-headings:mt-3 prose-headings:mb-1">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || "…"}</ReactMarkdown>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-            {sending && (
-              <div className="flex justify-start">
-                <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                  <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> Thinking…
+              ))}
+              {sending && (
+                <div className="flex w-full gap-3">
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
-      <div className="flex items-end gap-2 pt-3">
-        <Textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Tell the agent what to do…"
-          rows={2}
-          className="resize-none"
-          disabled={sending}
-        />
-        <Button onClick={send} disabled={sending || !input.trim()}>
-          <Send className="h-4 w-4" />
-        </Button>
+      {/* Composer */}
+      <div
+        className="border-t border-border/60 bg-background px-3 pb-3 pt-2 sm:px-4 sm:pb-4"
+        style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+      >
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="relative flex items-end rounded-2xl border border-border bg-card shadow-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20">
+            <textarea
+              ref={taRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+              }}
+              placeholder="Message Studio Agent…"
+              rows={1}
+              disabled={sending}
+              className="max-h-[200px] min-h-[44px] flex-1 resize-none bg-transparent px-4 py-3 pr-12 text-sm leading-snug outline-none placeholder:text-muted-foreground disabled:opacity-60"
+            />
+            <Button
+              type="button"
+              size="icon"
+              onClick={() => send()}
+              disabled={sending ? false : !input.trim()}
+              className="absolute bottom-1.5 right-1.5 h-9 w-9 rounded-xl"
+              aria-label="Send"
+            >
+              {sending ? <Square className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+            </Button>
+          </div>
+          <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">
+            Agent can manage campaigns, leads, offerings, intel, channels, social, templates & memory.
+          </p>
+        </div>
       </div>
     </div>
   );

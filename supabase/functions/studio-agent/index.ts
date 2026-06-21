@@ -18,19 +18,38 @@ const json = (status: number, payload: unknown) =>
   });
 
 const BASE_SYSTEM_PROMPT = `You are the Studio Agent for Outreach Studio — Bill Achusim's command center for his portfolio of African tech, social, and PR products.
-You help the user manage offerings, campaigns, leads, drafts, and sends.
-You have tools to start campaigns, check status, list leads/events, pause/resume runs, send a single pitch, draft pitches, score leads, post to social channels, summarize the day, and read/write your own persistent memory files.
-Be concise and direct. Use markdown. When the user asks about progress, call get_run_status, list_recent_events, or summarize_today first.
-Never invent leads, counts, or campaign names — always call a tool. If a tool returns nothing useful, say so plainly.
-When the user shares a preference, a new fact about a product, or asks you to remember something, call write_memory to persist it. When unsure who Bill is or what a product does, call read_memory or list_memories before guessing.
 
-## Learning loop (important)
+You are a full operator across the entire system. You can read AND tweak almost anything: offerings, campaigns, leads, pitches, channels, intel sources, intel items, social drafts & posts, templates, and your own persistent memory.
+
+## How to behave
+- Be concise, direct, and actionable. Use markdown (short headings, tight bullets, tables when useful).
+- Always call a tool to fetch real data — never invent leads, counts, campaign names, IDs, intel headlines, or offering details.
+- When the user asks "what's going on" / "give me a check-up" / "any suggestions" — proactively call multiple read tools (e.g. get_run_status + summarize_today + list_recent_events + list_recent_intel) and then suggest 1–3 concrete tweaks.
+- When the user asks to change something, perform the smallest reversible action and report back what changed. For destructive actions (delete_*, bulk_update_lead_status, send_pitch_now, post_*), briefly confirm in the same turn before acting unless the user was explicit.
+- Prefer suggesting + executing over just describing. If a fix is obviously safe (e.g. enable a stalled intel source, pause a failing run, score an un-scored lead, draft a missing pitch) — do it and say what you did.
+- If a tool returns nothing useful, say so plainly and suggest the next step.
+
+## Surfaces you can operate
+- **Offerings**: list_offerings, get_offering, create_offering, update_offering
+- **Campaigns**: list_campaigns, create_campaign, update_campaign, start_outreach, pause_run, resume_run, get_run_status
+- **Leads**: list_recent_leads, get_lead, find_similar_leads, enrich_lead_now, score_lead, bulk_update_lead_status
+- **Pitches**: draft_pitch_for_lead, send_pitch_now
+- **Channels (connected accounts)**: list_channels
+- **Intel sources**: list_intel_sources, add_intel_source, toggle_intel_source, delete_intel_source
+- **Intel items (news triggers)**: list_recent_intel, draft_pitch_from_intel
+- **Social**: list_social_drafts, create_social_draft, post_to_x, post_to_facebook, post_to_instagram
+- **Templates (email)**: list_templates, upsert_template, delete_template
+- **Messaging**: send_whatsapp
+- **Engine**: list_recent_events, summarize_today
+- **Memory**: list_memories, search_memories, read_memory, write_memory, append_memory, rename_memory, delete_memory
+
+## Learning loop
 You own your memory and must keep it useful over time:
-- When you spot a recurring failure, a winning subject line, a new product detail Bill mentions, or an objection pattern → call **append_memory** to add a dated bullet to the relevant playbook (cheaper + safer than rewriting the whole file).
+- When you spot a recurring failure, a winning subject line, a new product detail Bill mentions, or an objection pattern → call **append_memory** to add a dated bullet to the relevant playbook.
 - For a brand-new topic with no existing file, call **write_memory** with a kebab-case slug like \`objections-retailos\`, \`winning-subjects\`, \`lessons-learned\`, \`tone-feedback\`. Use kind \`playbook\` for SOPs, \`note\` for everything else.
 - If a memory file is stale or wrong, call **delete_memory** or **rename_memory**.
 - Before dumping all memories into context, prefer **search_memories** with a focused query.
-- Always read \`journal-rollup\` (rolling 7-day recap) before suggesting strategy. Read the latest \`daily-journal-*\` for yesterday's specifics.`;
+- Always read \`journal-rollup\` (rolling 7-day recap) before suggesting strategy.`;
 
 const TOOLS = [
   { type: "function", function: { name: "list_campaigns", description: "List the user's campaigns.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
@@ -61,6 +80,36 @@ const TOOLS = [
   { type: "function", function: { name: "search_memories", description: "Search memory files by case-insensitive substring across title, slug, and content. Returns matching slugs + snippets.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number", default: 8 } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "list_recent_intel", description: "List recent intel items (news triggers) for the user, newest first. Use to find the right intel item before drafting a pitch.", parameters: { type: "object", properties: { limit: { type: "number", default: 10 }, min_score: { type: "number" }, only_unactioned: { type: "boolean", default: true } }, additionalProperties: false } } },
   { type: "function", function: { name: "draft_pitch_from_intel", description: "Draft a PR/outreach pitch grounded in a specific intel item (news headline). Pass either intel_item_id, OR a headline_query to fuzzy-match the latest intel by title. Optionally pin to an offering and lead. If save=true, persists the pitch on the lead as a draft.", parameters: { type: "object", properties: { intel_item_id: { type: "string" }, headline_query: { type: "string" }, offering_id: { type: "string" }, lead_id: { type: "string" }, save: { type: "boolean", default: false } }, additionalProperties: false } } },
+
+  // Offerings
+  { type: "function", function: { name: "list_offerings", description: "List the user's offerings (products/services).", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "get_offering", description: "Get a single offering by id.", parameters: { type: "object", properties: { offering_id: { type: "string" } }, required: ["offering_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "create_offering", description: "Create a new offering.", parameters: { type: "object", properties: { title: { type: "string" }, tagline: { type: "string" }, problem_solved: { type: "string" }, ideal_customer: { type: "string" }, target_audience: { type: "string" }, pricing: { type: "string" }, demo_url: { type: "string" }, trigger_keywords: { type: "array", items: { type: "string" } }, auto_lead_from_intel: { type: "boolean" } }, required: ["title"], additionalProperties: false } } },
+  { type: "function", function: { name: "update_offering", description: "Update fields on an offering. Only pass fields you want to change.", parameters: { type: "object", properties: { offering_id: { type: "string" }, title: { type: "string" }, tagline: { type: "string" }, problem_solved: { type: "string" }, ideal_customer: { type: "string" }, target_audience: { type: "string" }, pricing: { type: "string" }, demo_url: { type: "string" }, status: { type: "string" }, trigger_keywords: { type: "array", items: { type: "string" } }, auto_lead_from_intel: { type: "boolean" } }, required: ["offering_id"], additionalProperties: false } } },
+
+  // Campaign update
+  { type: "function", function: { name: "update_campaign", description: "Update a campaign (rename, change channel, toggle auto_followup, change status, update city/category/keywords).", parameters: { type: "object", properties: { campaign_id: { type: "string" }, name: { type: "string" }, city: { type: "string" }, category: { type: "string" }, keywords: { type: "string" }, channel: { type: "string", enum: ["email", "whatsapp", "x", "facebook", "instagram"] }, status: { type: "string", enum: ["active", "paused", "archived"] }, auto_followup: { type: "boolean" }, offering_id: { type: "string" } }, required: ["campaign_id"], additionalProperties: false } } },
+
+  // Lead detail
+  { type: "function", function: { name: "get_lead", description: "Get full detail for a single lead (contact, notes, pitches, latest events).", parameters: { type: "object", properties: { lead_id: { type: "string" } }, required: ["lead_id"], additionalProperties: false } } },
+
+  // Channels
+  { type: "function", function: { name: "list_channels", description: "List connected channel accounts (email, whatsapp, x, facebook, instagram, telegram, linkedin) with status. Does NOT return credentials.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+
+  // Intel sources
+  { type: "function", function: { name: "list_intel_sources", description: "List user's intel sources (feeds we scan for news triggers).", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "add_intel_source", description: "Add a new intel source URL.", parameters: { type: "object", properties: { name: { type: "string" }, url: { type: "string" }, enabled: { type: "boolean", default: true }, auto_promoted: { type: "boolean", default: false } }, required: ["name", "url"], additionalProperties: false } } },
+  { type: "function", function: { name: "toggle_intel_source", description: "Enable or disable an intel source.", parameters: { type: "object", properties: { source_id: { type: "string" }, enabled: { type: "boolean" } }, required: ["source_id", "enabled"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_intel_source", description: "Delete an intel source.", parameters: { type: "object", properties: { source_id: { type: "string" } }, required: ["source_id"], additionalProperties: false } } },
+
+  // Social drafts
+  { type: "function", function: { name: "list_social_drafts", description: "List recent social drafts (queued, draft, posted, failed).", parameters: { type: "object", properties: { status: { type: "string" }, platform: { type: "string" }, limit: { type: "number", default: 15 } }, additionalProperties: false } } },
+  { type: "function", function: { name: "create_social_draft", description: "Create a social draft (does not post). Use platform: x, facebook, instagram, telegram, linkedin.", parameters: { type: "object", properties: { platform: { type: "string" }, body: { type: "string" }, intel_item_id: { type: "string" } }, required: ["platform", "body"], additionalProperties: false } } },
+
+  // Templates
+  { type: "function", function: { name: "list_templates", description: "List the user's email templates.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "upsert_template", description: "Create or update an email template. If template_id is omitted, creates a new one.", parameters: { type: "object", properties: { template_id: { type: "string" }, name: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["name"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_template", description: "Delete an email template.", parameters: { type: "object", properties: { template_id: { type: "string" } }, required: ["template_id"], additionalProperties: false } } },
 ];
 
 async function executeTool(name: string, args: any, ctx: { supabase: any; userId: string; tickUrl: string; serviceKey: string; supaUrl: string; authHeader: string }) {
@@ -278,6 +327,137 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
       });
       return r;
     }
+
+    // ---------- Offerings ----------
+    case "list_offerings": {
+      const { data } = await supabase.from("offerings")
+        .select("id, title, tagline, status, trigger_keywords, auto_lead_from_intel, ideal_customer, pricing, updated_at")
+        .eq("user_id", userId).order("updated_at", { ascending: false });
+      return data ?? [];
+    }
+    case "get_offering": {
+      const { data } = await supabase.from("offerings").select("*").eq("id", args.offering_id).eq("user_id", userId).maybeSingle();
+      return data ?? { error: "Offering not found" };
+    }
+    case "create_offering": {
+      const { data, error } = await supabase.from("offerings").insert({
+        user_id: userId,
+        title: args.title,
+        tagline: args.tagline ?? null,
+        problem_solved: args.problem_solved ?? null,
+        ideal_customer: args.ideal_customer ?? null,
+        target_audience: args.target_audience ?? null,
+        pricing: args.pricing ?? null,
+        demo_url: args.demo_url ?? null,
+        trigger_keywords: args.trigger_keywords ?? [],
+        auto_lead_from_intel: args.auto_lead_from_intel ?? false,
+        status: "active",
+      }).select("id, title").single();
+      return error ? { error: error.message } : data;
+    }
+    case "update_offering": {
+      const patch: any = {};
+      for (const k of ["title","tagline","problem_solved","ideal_customer","target_audience","pricing","demo_url","status","trigger_keywords","auto_lead_from_intel"]) {
+        if (args[k] !== undefined) patch[k] = args[k];
+      }
+      if (!Object.keys(patch).length) return { error: "No fields to update" };
+      const { error } = await supabase.from("offerings").update(patch).eq("id", args.offering_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, updated: args.offering_id, fields: Object.keys(patch) };
+    }
+
+    // ---------- Campaign update ----------
+    case "update_campaign": {
+      const patch: any = {};
+      for (const k of ["name","city","category","keywords","channel","status","auto_followup","offering_id"]) {
+        if (args[k] !== undefined) patch[k] = args[k];
+      }
+      if (!Object.keys(patch).length) return { error: "No fields to update" };
+      const { error } = await supabase.from("campaigns").update(patch).eq("id", args.campaign_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, updated: args.campaign_id, fields: Object.keys(patch) };
+    }
+
+    // ---------- Lead detail ----------
+    case "get_lead": {
+      const { data: lead } = await supabase.from("leads").select("*").eq("id", args.lead_id).eq("user_id", userId).maybeSingle();
+      if (!lead) return { error: "Lead not found" };
+      const { data: pitches } = await supabase.from("pitches").select("id, subject, body, status, sent_at, created_at").eq("lead_id", args.lead_id).order("created_at", { ascending: false }).limit(5);
+      const { data: events } = await supabase.from("pitch_events").select("event_type, occurred_at").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(10);
+      return { lead, pitches: pitches ?? [], recent_pitch_events: events ?? [] };
+    }
+
+    // ---------- Channels ----------
+    case "list_channels": {
+      const { data } = await supabase.from("channel_accounts")
+        .select("id, channel, display_name, status, external_id, updated_at")
+        .eq("user_id", userId).order("channel");
+      return data ?? [];
+    }
+
+    // ---------- Intel sources ----------
+    case "list_intel_sources": {
+      const { data } = await supabase.from("intel_sources")
+        .select("id, name, url, enabled, auto_promoted, created_at")
+        .eq("user_id", userId).order("created_at", { ascending: false });
+      return data ?? [];
+    }
+    case "add_intel_source": {
+      const { data, error } = await supabase.from("intel_sources").insert({
+        user_id: userId, name: args.name, url: args.url,
+        enabled: args.enabled ?? true, auto_promoted: args.auto_promoted ?? false,
+      }).select("id, name, url").single();
+      return error ? { error: error.message } : data;
+    }
+    case "toggle_intel_source": {
+      const { error } = await supabase.from("intel_sources").update({ enabled: !!args.enabled }).eq("id", args.source_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, source_id: args.source_id, enabled: !!args.enabled };
+    }
+    case "delete_intel_source": {
+      const { error } = await supabase.from("intel_sources").delete().eq("id", args.source_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, deleted: args.source_id };
+    }
+
+    // ---------- Social drafts ----------
+    case "list_social_drafts": {
+      let q = supabase.from("social_drafts")
+        .select("id, platform, body, status, posted_at, provider_post_id, intel_item_id, created_at")
+        .eq("user_id", userId);
+      if (args?.status) q = q.eq("status", args.status);
+      if (args?.platform) q = q.eq("platform", args.platform);
+      const { data } = await q.order("created_at", { ascending: false }).limit(args?.limit ?? 15);
+      return data ?? [];
+    }
+    case "create_social_draft": {
+      const { data, error } = await supabase.from("social_drafts").insert({
+        user_id: userId, platform: args.platform, body: args.body,
+        intel_item_id: args.intel_item_id ?? null, status: "draft",
+      }).select("id, platform, status").single();
+      return error ? { error: error.message } : data;
+    }
+
+    // ---------- Templates ----------
+    case "list_templates": {
+      const { data } = await supabase.from("templates").select("id, name, subject, body, updated_at").eq("user_id", userId).order("updated_at", { ascending: false });
+      return data ?? [];
+    }
+    case "upsert_template": {
+      if (args.template_id) {
+        const patch: any = {};
+        if (args.name !== undefined) patch.name = args.name;
+        if (args.subject !== undefined) patch.subject = args.subject;
+        if (args.body !== undefined) patch.body = args.body;
+        const { error } = await supabase.from("templates").update(patch).eq("id", args.template_id).eq("user_id", userId);
+        return error ? { error: error.message } : { ok: true, updated: args.template_id };
+      }
+      const { data, error } = await supabase.from("templates").insert({
+        user_id: userId, name: args.name, subject: args.subject ?? null, body: args.body ?? null,
+      }).select("id, name").single();
+      return error ? { error: error.message } : data;
+    }
+    case "delete_template": {
+      const { error } = await supabase.from("templates").delete().eq("id", args.template_id).eq("user_id", userId);
+      return error ? { error: error.message } : { ok: true, deleted: args.template_id };
+    }
+
     default: return { error: `Unknown tool ${name}` };
   }
 }
@@ -339,7 +519,7 @@ Deno.serve(async (req) => {
     const ctx = { supabase, userId: user.id, tickUrl, serviceKey: SERVICE_KEY, supaUrl: SUPABASE_URL, authHeader };
 
     let finalContent = "";
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 8; i++) {
       const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
