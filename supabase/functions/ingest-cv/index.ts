@@ -198,6 +198,9 @@ ${(profile.highlights || []).map((h: string) => `- ${h}`).join("\n")}
       content: memoryContent,
     }, { onConflict: "user_id,slug" });
 
+    // 2b. Cache parsed CV text on the profile for fast tailoring later
+    await admin.from("profiles").update({ base_cv_md: memoryContent }).eq("user_id", user.id);
+
     // 3. Create the Freelance Jobs campaign if missing
     const { data: existingCamp } = await supabase
       .from("campaigns")
