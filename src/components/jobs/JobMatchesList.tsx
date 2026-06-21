@@ -152,7 +152,7 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid gap-2 sm:grid-cols-[1fr_140px_160px]">
+          <div className="grid gap-2 sm:grid-cols-[1fr_140px_160px_180px]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, company, source…" className="pl-9" />
@@ -180,6 +180,16 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
               <option value="sent">Sent</option>
               <option value="stale">Stale</option>
               <option value="dedup_existing">Dedup</option>
+            </select>
+            <select
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
+              title="Filter by job source"
+            >
+              <option value="all">All sources</option>
+              {sourceOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
             </select>
           </div>
 
