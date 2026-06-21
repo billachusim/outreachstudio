@@ -268,6 +268,13 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ApplyKitDialog
+        open={!!kitJob}
+        onOpenChange={(o) => { if (!o) { setKitJob(null); setKit(null); } }}
+        job={kitJob}
+        kit={kit}
+      />
     </>
   );
 };
