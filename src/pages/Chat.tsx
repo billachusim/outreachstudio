@@ -98,7 +98,7 @@ const Chat = () => {
   return (
     <div className="flex h-[calc(100dvh-3.5rem-4rem)] flex-col md:h-[calc(100dvh-3.5rem)]">
       {/* Top bar */}
-      <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 sm:px-4">
+      <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-3 py-2 sm:px-4">
         <div className="flex items-center gap-2 min-w-0">
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <Sparkles className="h-3.5 w-3.5" />
