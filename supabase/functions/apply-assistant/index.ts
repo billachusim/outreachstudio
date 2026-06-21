@@ -59,13 +59,16 @@ Deno.serve(async (req) => {
       } catch (e) { console.error("apply-assistant: scrape", e); }
     }
 
-    // 2) Load candidate profile + base CV
-    const { data: mem } = await supabase.from("agent_memories")
-      .select("content").eq("user_id", user.id).eq("slug", "freelance-senior-engineer").maybeSingle();
-    const profile = mem?.content || "";
+    // 2) Load candidate profile + job-application profile + base CV
+    const { data: mems } = await supabase.from("agent_memories")
+      .select("slug, content").eq("user_id", user.id)
+      .in("slug", ["freelance-senior-engineer", "job-application-profile"]);
+    const profile = mems?.find(m => m.slug === "freelance-senior-engineer")?.content || "";
+    const jobProfile = mems?.find(m => m.slug === "job-application-profile")?.content || "";
     const { data: prof } = await supabase.from("profiles")
       .select("base_cv_md, display_name").eq("user_id", user.id).maybeSingle();
     const baseCv = prof?.base_cv_md || "";
+
 
     // 3) Detect apply method heuristically
     const lowerUrl = (targetUrl || "").toLowerCase();
