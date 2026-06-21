@@ -175,7 +175,7 @@ const Chat = () => {
 
       {/* Composer */}
       <div
-        className="border-t border-border/60 bg-background px-3 pb-3 pt-2 sm:px-4 sm:pb-4"
+        className="shrink-0 border-t border-border/60 bg-background px-3 pb-3 pt-2 sm:px-4 sm:pb-4"
         style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
         <div className="mx-auto w-full max-w-3xl">
