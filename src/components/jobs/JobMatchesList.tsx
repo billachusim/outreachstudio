@@ -9,8 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
-import { Briefcase, RefreshCw, FileText, ExternalLink, Copy, Loader2, Search, Filter } from "lucide-react";
+import { Briefcase, RefreshCw, FileText, ExternalLink, Copy, Loader2, Search, Filter, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+import { ApplyKitDialog, type ApplicationKit } from "./ApplyKitDialog";
 
 type JobPost = {
   id: string;
