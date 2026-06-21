@@ -15,7 +15,6 @@ const GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
 const DEFAULT_DAILY_CAP = 120;
 // Verified domain: techfaculty.ng (Resend)
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
-const REPLY_TO = "thetechfaculty@gmail.com";
 const SENDING_DOMAIN = "techfaculty.ng";
 
 interface Body {
@@ -118,7 +117,6 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: FROM,
         to: [lead.contact_email],
-        reply_to: REPLY_TO,
         subject: pitch.subject,
         html: bodyToHtml(pitch.body),
         text: pitch.body,

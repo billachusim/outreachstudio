@@ -5,7 +5,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const RESEND_GATEWAY = "https://connector-gateway.lovable.dev/resend";
 const FROM = "Tech Faculty NG <outreach@techfaculty.ng>";
-const REPLY_TO = "thetechfaculty@gmail.com";
 
 const json = (s: number, p: unknown) =>
   new Response(JSON.stringify(p), { status: s, headers: { "Content-Type": "application/json" } });
@@ -147,7 +146,7 @@ Deno.serve(async (req) => {
           "X-Connection-Api-Key": RESEND_API_KEY,
         },
         body: JSON.stringify({
-          from: FROM, to: [lead.contact_email], reply_to: REPLY_TO,
+          from: FROM, to: [lead.contact_email],
           subject: `Re: ${subject}`, html: bodyToHtml(body), text: body,
           ...(messageIdHeader ? { headers: { "Message-ID": messageIdHeader } } : {}),
         }),
