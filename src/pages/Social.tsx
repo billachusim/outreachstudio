@@ -4,11 +4,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Send, Trash2, Newspaper, Loader2, Twitter, Linkedin, Instagram } from "lucide-react";
+import { Copy, Send, Trash2, Newspaper, Loader2, Twitter, Linkedin, Instagram, Send as SendIcon } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 
-type Platform = "x" | "linkedin" | "instagram";
+type Platform = "x" | "linkedin" | "instagram" | "telegram";
 type IntelLite = { id: string; title: string; url: string | null; source: string };
 type Draft = {
   id: string;
@@ -26,7 +26,9 @@ const platformMeta: Record<Platform, { label: string; icon: any; postFn: string 
   x: { label: "X", icon: Twitter, postFn: "post-x" },
   linkedin: { label: "LinkedIn", icon: Linkedin, postFn: "post-linkedin" },
   instagram: { label: "Instagram", icon: Instagram, postFn: "post-instagram" },
+  telegram: { label: "Telegram", icon: SendIcon, postFn: "post-telegram" },
 };
+const PLATFORMS: Platform[] = ["x", "linkedin", "instagram", "telegram"];
 
 const Social = () => {
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -85,13 +87,14 @@ const Social = () => {
     const payload: Record<string, unknown> =
       d.platform === "instagram" ? { caption: d.body, imageUrl: "" } :
       d.platform === "linkedin" ? { text: d.body, draftId: d.id } :
+      d.platform === "telegram" ? { text: d.body, draftId: d.id } :
       { text: d.body };
     const { data, error } = await supabase.functions.invoke(meta.postFn, { body: payload });
     setPosting(null);
     if (error) return toast.error(error.message);
     if ((data as any)?.error) return toast.error((data as any).error);
-    // post-linkedin already updates the draft itself.
-    if (d.platform !== "linkedin") {
+    // post-linkedin & post-telegram already update the draft themselves.
+    if (d.platform !== "linkedin" && d.platform !== "telegram") {
       await supabase.from("social_drafts").update({
         status: "posted",
         posted_at: new Date().toISOString(),
@@ -106,6 +109,7 @@ const Social = () => {
     if (p === "x") return channels.has("x") || channels.has("twitter");
     if (p === "instagram") return channels.has("instagram");
     if (p === "linkedin") return channels.has("linkedin");
+    if (p === "telegram") return channels.has("telegram");
     return false;
   };
 
@@ -119,8 +123,8 @@ const Social = () => {
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Platform)}>
-        <TabsList className="grid w-full grid-cols-3 sm:w-auto sm:inline-grid">
-          {(["x", "linkedin", "instagram"] as Platform[]).map((p) => {
+        <TabsList className="grid w-full grid-cols-4 sm:w-auto sm:inline-grid">
+          {PLATFORMS.map((p) => {
             const meta = platformMeta[p];
             const Icon = meta.icon;
             const count = drafts.filter((d) => d.platform === p && d.status === "draft").length;
@@ -133,7 +137,7 @@ const Social = () => {
           })}
         </TabsList>
 
-        {(["x", "linkedin", "instagram"] as Platform[]).map((p) => (
+        {PLATFORMS.map((p) => (
           <TabsContent key={p} value={p} className="space-y-3 mt-4">
             {!isPlatformConnected(p) && (
               <Card className="border-warning/40">
