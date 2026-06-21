@@ -10,6 +10,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Offerings from "./pages/Offerings";
 import Campaigns from "./pages/Campaigns";
+import Jobs from "./pages/Jobs";
 import Leads from "./pages/Leads";
 import Templates from "./pages/Templates";
 import Inbox from "./pages/Inbox";
@@ -42,6 +43,7 @@ const App = () => (
               <Route path="/" element={<Dashboard />} />
               <Route path="/offerings" element={<Offerings />} />
               <Route path="/campaigns" element={<Campaigns />} />
+              <Route path="/jobs" element={<Jobs />} />
               <Route path="/leads" element={<Leads />} />
               <Route path="/templates" element={<Templates />} />
               <Route path="/inbox" element={<Inbox />} />

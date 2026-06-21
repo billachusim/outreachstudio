@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { TopTriggersWidget } from "@/components/TopTriggersWidget";
 import { FetchLeadsProgress } from "@/components/FetchLeadsProgress";
-import { JobHuntPanel } from "@/components/JobHuntPanel";
+import { JobsSummaryCard } from "@/components/jobs/JobsSummaryCard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -246,7 +246,7 @@ const Dashboard = () => {
         </CardContent>
       </Card>
 
-      <JobHuntPanel />
+      <JobsSummaryCard />
 
       <FetchLeadsProgress variant="card" />
 
