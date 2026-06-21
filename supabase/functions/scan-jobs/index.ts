@@ -256,13 +256,17 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
         continue;
       }
 
+      // website is left NULL because root_domain is a generated column with a
+      // unique (user_id, root_domain) index. Job-board URLs all share the
+      // aggregator host (weworkremotely.com, remoteok.com), which would
+      // collapse all postings into one lead. Apply URL stays on job_posts.
       const { error: lerr } = await supabase.from("leads").insert({
         user_id: userId,
         campaign_id: camp.id,
         business_name: jp.company || jp.title,
-        website: jp.apply_url || jp.url,
+        website: null,
         contact_email: jp.apply_email ?? null,
-        notes: `Job: ${jp.title}${jp.company ? ` @ ${jp.company}` : ""}`,
+        notes: `Job: ${jp.title}${jp.company ? ` @ ${jp.company}` : ""}\nApply: ${jp.apply_url || jp.url}`,
         status: jp.apply_email ? "enriched" : "new",
         job_post_id: jp.id,
       });
