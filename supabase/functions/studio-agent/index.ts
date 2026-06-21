@@ -98,7 +98,7 @@ const TOOLS = [
 
   // Intel sources
   { type: "function", function: { name: "list_intel_sources", description: "List user's intel sources (feeds we scan for news triggers).", parameters: { type: "object", properties: {}, additionalProperties: false } } },
-  { type: "function", function: { name: "add_intel_source", description: "Add a new intel source URL.", parameters: { type: "object", properties: { name: { type: "string" }, url: { type: "string" }, enabled: { type: "boolean", default: true }, auto_promoted: { type: "boolean", default: false } }, required: ["name", "url"], additionalProperties: false } } },
+  { type: "function", function: { name: "add_intel_source", description: "Add a new intel source URL. Use kind='job_board' for remote-job sites (Remote OK, We Work Remotely, HN Who is Hiring) or 'talent_marketplace' for profile-based sites (Micro1, Mercor, Toptal). Defaults to 'news'.", parameters: { type: "object", properties: { name: { type: "string" }, url: { type: "string" }, kind: { type: "string", enum: ["news", "job_board", "talent_marketplace"] }, enabled: { type: "boolean", default: true }, auto_promoted: { type: "boolean", default: false } }, required: ["name", "url"], additionalProperties: false } } },
   { type: "function", function: { name: "toggle_intel_source", description: "Enable or disable an intel source.", parameters: { type: "object", properties: { source_id: { type: "string" }, enabled: { type: "boolean" } }, required: ["source_id", "enabled"], additionalProperties: false } } },
   { type: "function", function: { name: "delete_intel_source", description: "Delete an intel source.", parameters: { type: "object", properties: { source_id: { type: "string" } }, required: ["source_id"], additionalProperties: false } } },
 
@@ -110,6 +110,12 @@ const TOOLS = [
   { type: "function", function: { name: "list_templates", description: "List the user's email templates.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "upsert_template", description: "Create or update an email template. If template_id is omitted, creates a new one.", parameters: { type: "object", properties: { template_id: { type: "string" }, name: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["name"], additionalProperties: false } } },
   { type: "function", function: { name: "delete_template", description: "Delete an email template.", parameters: { type: "object", properties: { template_id: { type: "string" } }, required: ["template_id"], additionalProperties: false } } },
+
+  // --- Freelance job-hunt track ---
+  { type: "function", function: { name: "list_job_posts", description: "List remote job posts scraped for the user, newest first. Filter by min_score (default 0) and status.", parameters: { type: "object", properties: { min_score: { type: "number", default: 0 }, status: { type: "string" }, limit: { type: "number", default: 15 } }, additionalProperties: false } } },
+  { type: "function", function: { name: "get_job_post", description: "Get full detail of a single job post including description, apply email/url, and any drafted application.", parameters: { type: "object", properties: { job_post_id: { type: "string" } }, required: ["job_post_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "scan_jobs_now", description: "Trigger an immediate scan of all configured job_board intel sources + the defaults (Remote OK, We Work Remotely). Runs in the background and inserts new job_posts + leads.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "draft_application", description: "Draft a tailored cover letter + resume bullets for a job_post. Saves the result as a pitch on the linked lead.", parameters: { type: "object", properties: { job_post_id: { type: "string" } }, required: ["job_post_id"], additionalProperties: false } } },
 ];
 
 async function executeTool(name: string, args: any, ctx: { supabase: any; userId: string; tickUrl: string; serviceKey: string; supaUrl: string; authHeader: string }) {
@@ -402,9 +408,9 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
     }
     case "add_intel_source": {
       const { data, error } = await supabase.from("intel_sources").insert({
-        user_id: userId, name: args.name, url: args.url,
+        user_id: userId, name: args.name, url: args.url, kind: args.kind ?? "news",
         enabled: args.enabled ?? true, auto_promoted: args.auto_promoted ?? false,
-      }).select("id, name, url").single();
+      }).select("id, name, url, kind").single();
       return error ? { error: error.message } : data;
     }
     case "toggle_intel_source": {
@@ -456,6 +462,36 @@ async function executeTool(name: string, args: any, ctx: { supabase: any; userId
     case "delete_template": {
       const { error } = await supabase.from("templates").delete().eq("id", args.template_id).eq("user_id", userId);
       return error ? { error: error.message } : { ok: true, deleted: args.template_id };
+    }
+
+    // ---------- Freelance job hunt ----------
+    case "list_job_posts": {
+      let q = supabase.from("job_posts")
+        .select("id, title, company, url, apply_email, apply_url, location, salary_text, score, status, posted_at, tags, created_at")
+        .eq("user_id", userId);
+      if (typeof args?.min_score === "number") q = q.gte("score", args.min_score);
+      if (args?.status) q = q.eq("status", args.status);
+      const { data } = await q.order("score", { ascending: false }).order("created_at", { ascending: false }).limit(args?.limit ?? 15);
+      return data ?? [];
+    }
+    case "get_job_post": {
+      const { data: jp } = await supabase.from("job_posts").select("*").eq("id", args.job_post_id).eq("user_id", userId).maybeSingle();
+      if (!jp) return { error: "Not found" };
+      const { data: lead } = await supabase.from("leads").select("id, status").eq("job_post_id", jp.id).eq("user_id", userId).maybeSingle();
+      let pitches: any[] = [];
+      if (lead?.id) {
+        const { data: ps } = await supabase.from("pitches").select("id, subject, body, sent_at, created_at").eq("lead_id", lead.id).order("created_at", { ascending: false });
+        pitches = ps ?? [];
+      }
+      return { ...jp, lead, pitches };
+    }
+    case "scan_jobs_now": {
+      const r = await invoke("scan-jobs", {});
+      return r;
+    }
+    case "draft_application": {
+      const r = await invoke("draft-application", { job_post_id: args.job_post_id });
+      return r;
     }
 
     default: return { error: `Unknown tool ${name}` };
