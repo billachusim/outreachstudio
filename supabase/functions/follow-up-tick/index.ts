@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
           "X-Connection-Api-Key": RESEND_API_KEY,
         },
         body: JSON.stringify({
-          from: FROM, to: [lead.contact_email], reply_to: REPLY_TO,
+          from: FROM, to: [lead.contact_email],
           subject: `Re: ${subject}`, html: bodyToHtml(body), text: body,
           ...(messageIdHeader ? { headers: { "Message-ID": messageIdHeader } } : {}),
         }),
