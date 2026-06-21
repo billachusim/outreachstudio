@@ -566,24 +566,68 @@ Notes: ${lead.notes ?? ""}`;
       }
 
       // Concurrent-campaign quality gate: at most 3 campaigns may send per day.
-      // Campaigns already sending today keep their slot; new ones beyond the cap
-      // pause until tomorrow so we spend our 100/day on top-priority work.
+      // Ranking: campaigns already sending today keep their slot; remaining slots
+      // are filled by the highest intel relevance_score (campaigns spawned from
+      // top-priority intel win). Campaigns without intel get a baseline of 50.
       const MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY = 3;
       const { data: todaysPitches } = await supabase
         .from("pitches")
         .select("lead_id, leads!inner(campaign_id)")
         .eq("user_id", run.user_id)
         .gte("sent_at", startOfDay.toISOString());
-      const activeCampaignIds = new Set<string>();
+      const sentTodayCampaignIds = new Set<string>();
       for (const p of (todaysPitches ?? []) as Array<{ leads: { campaign_id: string | null } | null }>) {
         const cid = p.leads?.campaign_id;
-        if (cid) activeCampaignIds.add(cid);
+        if (cid) sentTodayCampaignIds.add(cid);
       }
-      if (!activeCampaignIds.has(campaign.id) && activeCampaignIds.size >= MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY) {
-        await logEvent("info", `Daily concurrent-campaign cap reached (${activeCampaignIds.size}/${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY}). Pausing "${campaign.name}" until tomorrow.`);
-        await updateRun({ state: "paused" as never, error: `Concurrent-campaign cap reached. Resumes tomorrow.` });
+
+      const allowedToday = new Set<string>(sentTodayCampaignIds);
+      if (allowedToday.size < MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY) {
+        const { data: activeCamps } = await supabase
+          .from("campaigns")
+          .select("id, created_at")
+          .eq("user_id", run.user_id)
+          .eq("status", "active");
+        const activeIds = (activeCamps ?? []).map((c) => c.id);
+        const candidateIds = activeIds.filter((id) => !allowedToday.has(id));
+
+        const scoreMap = new Map<string, number>();
+        if (candidateIds.length > 0) {
+          const { data: intels } = await supabase
+            .from("intel_items")
+            .select("spawned_campaign_id, relevance_score")
+            .eq("user_id", run.user_id)
+            .in("spawned_campaign_id", candidateIds);
+          for (const it of (intels ?? []) as Array<{ spawned_campaign_id: string | null; relevance_score: number | null }>) {
+            if (!it.spawned_campaign_id) continue;
+            const prev = scoreMap.get(it.spawned_campaign_id) ?? 0;
+            const s = it.relevance_score ?? 0;
+            if (s > prev) scoreMap.set(it.spawned_campaign_id, s);
+          }
+        }
+        const createdAt = new Map<string, string>();
+        for (const c of (activeCamps ?? []) as Array<{ id: string; created_at: string }>) {
+          createdAt.set(c.id, c.created_at);
+        }
+        const ranked = candidateIds
+          .map((id) => ({ id, score: scoreMap.get(id) ?? 50, created: createdAt.get(id) ?? "" }))
+          .sort((a, b) => (b.score - a.score) || (b.created.localeCompare(a.created)));
+        for (const r of ranked) {
+          if (allowedToday.size >= MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY) break;
+          allowedToday.add(r.id);
+        }
+      }
+
+      if (!allowedToday.has(campaign.id)) {
+        const myScore = scoreMapPeek(supabase); // placeholder, see below
+        await logEvent(
+          "info",
+          `Priority gate: "${campaign.name}" not in today's top ${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY} (by intel score). Pausing until tomorrow.`,
+        );
+        await updateRun({ state: "paused" as never, error: `Lower priority than today's top ${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY} campaigns. Resumes tomorrow.` });
         return json(200, { ok: true, paused: true });
       }
+
 
       // Find highest-score drafted lead with a pitch + email
       const { data: lead } = await supabase
