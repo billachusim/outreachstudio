@@ -519,7 +519,7 @@ Deno.serve(async (req) => {
     const ctx = { supabase, userId: user.id, tickUrl, serviceKey: SERVICE_KEY, supaUrl: SUPABASE_URL, authHeader };
 
     let finalContent = "";
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 8; i++) {
       const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
