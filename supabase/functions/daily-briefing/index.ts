@@ -8,6 +8,17 @@ const json = (s: number, p: unknown) =>
 
 async function runBriefingJob(supabase: any, LOVABLE_API_KEY: string, force: boolean) {
   try {
+    // 1. Recompute today's email budget split (outreach vs job_hunt) for every user.
+    try {
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+      const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      await fetch(`${SUPABASE_URL}/functions/v1/allocate-email-budget`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+        body: JSON.stringify({}),
+      });
+    } catch (e) { console.error("daily-briefing: budget alloc failed", e); }
+
     const { data: users } = await supabase.from("campaigns").select("user_id");
     const userIds = Array.from(new Set((users ?? []).map((u: any) => u.user_id)));
     const today = new Date().toISOString().slice(0, 10);
