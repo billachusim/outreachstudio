@@ -262,12 +262,12 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
         business_name: jp.company || jp.title,
         website: jp.apply_url || jp.url,
         contact_email: jp.apply_email ?? null,
-        root_domain: host,
         notes: `Job: ${jp.title}${jp.company ? ` @ ${jp.company}` : ""}`,
         status: jp.apply_email ? "enriched" : "new",
         job_post_id: jp.id,
       });
-      if (!lerr) totalLeads++;
+      if (lerr) console.error("scan-jobs lead insert error", lerr);
+      else totalLeads++;
     }
   }
 
