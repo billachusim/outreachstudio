@@ -222,7 +222,8 @@ export const CvTailorPanel = () => {
                 )}
                 <Button size="sm" variant="ghost" onClick={copy}><Copy className="h-3.5 w-3.5" /> Copy MD</Button>
                 <Button size="sm" variant="ghost" onClick={downloadMd}><Download className="h-3.5 w-3.5" /> .md</Button>
-                <Button size="sm" variant="ghost" onClick={printPdf}><Printer className="h-3.5 w-3.5" /> Print / PDF</Button>
+                <Button size="sm" variant="ghost" onClick={downloadPdf}><FileDown className="h-3.5 w-3.5" /> Download PDF</Button>
+                <Button size="sm" variant="ghost" onClick={printPdf}><Printer className="h-3.5 w-3.5" /> Print</Button>
               </div>
             </div>
             {out.summary_of_changes && (
