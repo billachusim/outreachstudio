@@ -124,16 +124,16 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Hard cap: at most 3 follow-ups sent per lead per campaign, total.
+      // Hard cap: per-campaign max_follow_ups (default 3, job_hunt = 1).
       if (lead.campaign_id) {
         const { count: sentFollowups } = await supabase
           .from("pitch_sequences").select("id", { count: "exact", head: true })
           .eq("lead_id", lead.id)
           .eq("campaign_id", lead.campaign_id)
           .eq("status", "sent");
-        if ((sentFollowups ?? 0) >= 3) {
+        if ((sentFollowups ?? 0) >= maxFollowUps) {
           await supabase.from("pitch_sequences")
-            .update({ status: "cancelled", reason: "max follow-ups (3) reached" })
+            .update({ status: "cancelled", reason: `max follow-ups (${maxFollowUps}) reached` })
             .eq("lead_id", lead.id).eq("campaign_id", lead.campaign_id).eq("status", "scheduled");
           skipped++;
           continue;
