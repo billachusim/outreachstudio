@@ -120,15 +120,22 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
     catch { toast.error("Copy failed"); }
   };
 
+  const sourceOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of posts) if (p.source) s.add(p.source);
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [posts]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return posts.filter((p) => {
       if ((p.score ?? 0) < minScore) return false;
       if (statusFilter !== "all" && (p.status ?? "new") !== statusFilter) return false;
+      if (sourceFilter !== "all" && (p.source ?? "") !== sourceFilter) return false;
       if (!q) return true;
       return (p.title + " " + (p.company ?? "") + " " + (p.location ?? "") + " " + (p.source ?? "")).toLowerCase().includes(q);
     });
-  }, [posts, search, minScore, statusFilter]);
+  }, [posts, search, minScore, statusFilter, sourceFilter]);
 
   const fmtDate = (s?: string | null) => s ? new Date(s).toLocaleString() : "";
 
