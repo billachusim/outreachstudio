@@ -153,6 +153,7 @@ export type Database = {
           follow_up_days: number[]
           id: string
           keywords: string | null
+          max_follow_ups: number
           mode: string
           name: string
           offering_id: string | null
@@ -174,6 +175,7 @@ export type Database = {
           follow_up_days?: number[]
           id?: string
           keywords?: string | null
+          max_follow_ups?: number
           mode?: string
           name: string
           offering_id?: string | null
@@ -195,6 +197,7 @@ export type Database = {
           follow_up_days?: number[]
           id?: string
           keywords?: string | null
+          max_follow_ups?: number
           mode?: string
           name?: string
           offering_id?: string | null
@@ -412,6 +415,45 @@ export type Database = {
           id?: string
           metrics?: Json
           read_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      email_budgets: {
+        Row: {
+          created_at: string
+          date: string
+          id: string
+          jobhunt_cap: number
+          jobhunt_sent: number
+          notes: string | null
+          outreach_cap: number
+          outreach_sent: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          id?: string
+          jobhunt_cap?: number
+          jobhunt_sent?: number
+          notes?: string | null
+          outreach_cap?: number
+          outreach_sent?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          id?: string
+          jobhunt_cap?: number
+          jobhunt_sent?: number
+          notes?: string | null
+          outreach_cap?: number
+          outreach_sent?: number
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
