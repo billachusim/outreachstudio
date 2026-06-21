@@ -142,7 +142,17 @@ ${block}`,
         {/* Missing info / profile gaps */}
         {kit.missing_info && kit.missing_info.length > 0 && (
           <section className="space-y-2">
-            <h3 className="text-sm font-semibold">Missing from your profile</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Missing from your profile</h3>
+              <Link to="/memory" className="text-[11px] text-muted-foreground underline hover:text-foreground">
+                View in Memory →
+              </Link>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Saved to a dedicated <span className="font-mono">job-application-profile</span> memory.
+              Fill in the answers there once and the assistant reuses them on future applications.
+            </p>
+
             <div className="divide-y rounded-md border bg-muted/20">
               {kit.missing_info.map((m, i) => (
                 <div key={i} className="flex items-start gap-2 p-2.5">
