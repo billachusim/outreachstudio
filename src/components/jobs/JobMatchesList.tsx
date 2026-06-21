@@ -215,9 +215,19 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
                     >
                       {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="truncate text-sm font-medium">{p.title}</span>
                           <Badge variant="outline" className="text-[10px]">{p.score ?? 0}</Badge>
+                          {p.source && (
+                            <Badge
+                              variant="secondary"
+                              className="text-[10px] cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); setSourceFilter(p.source!); }}
+                              title={`Filter by ${p.source}`}
+                            >
+                              {p.source}
+                            </Badge>
+                          )}
                           {p.status === "drafted" && <Badge variant="secondary" className="text-[10px]">drafted</Badge>}
                           {p.status === "stale" && <Badge variant="destructive" className="text-[10px]">stale</Badge>}
                           {p.status === "sent" && <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[10px]">sent</Badge>}
@@ -225,7 +235,7 @@ export const JobMatchesList = ({ onChanged }: { onChanged?: () => void }) => {
                           {hasKit && <Badge variant="outline" className="text-[10px]"><Wand2 className="h-2.5 w-2.5" /> kit</Badge>}
                         </div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {[p.company, p.location, p.salary_text, p.source].filter(Boolean).join(" · ")}
+                          {[p.company, p.location, p.salary_text].filter(Boolean).join(" · ")}
                         </div>
                       </div>
                       <Button size="sm" variant="ghost" className="h-7" asChild onClick={(e) => e.stopPropagation()}>
