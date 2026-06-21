@@ -99,6 +99,19 @@ export const JobSourcesPanel = () => {
     setSources((p) => p.filter((x) => x.id !== s.id));
   };
 
+  const scanSummary = (nm: string) => {
+    const s = lastScans[nm];
+    if (!s) return null;
+    const hint = s.fetched === 0
+      ? " · likely requires login or no listings extractable"
+      : s.kept_new === 0 ? " · all duplicates" : "";
+    return (
+      <p className={`text-[11px] mt-0.5 ${s.level === "warn" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+        Last scan: fetched {s.fetched}, kept {s.kept_new}{hint}
+      </p>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <Card>
