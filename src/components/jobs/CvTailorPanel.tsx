@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CvUploadCard } from "@/components/CvUploadCard";
-import { Sparkles, Loader2, Copy, Download, Printer, Save } from "lucide-react";
+import { Sparkles, Loader2, Copy, Download, Printer, Save, FileDown } from "lucide-react";
+import jsPDF from "jspdf";
 import { toast } from "sonner";
 
 type Job = { id: string; title: string; company: string | null; score: number | null };
