@@ -42,6 +42,9 @@ type Props = {
 export const ApplyKitDialog = ({ open, onOpenChange, job, kit }: Props) => {
   const { user } = useAuth();
   const [savingField, setSavingField] = useState<string | null>(null);
+  const [openInput, setOpenInput] = useState<string | null>(null);
+  const [inputValue, setInputValue] = useState("");
+  const [savedFields, setSavedFields] = useState<Set<string>>(new Set());
 
   const copy = async (txt: string, label: string) => {
     try { await navigator.clipboard.writeText(txt); toast.success(`${label} copied`); }
