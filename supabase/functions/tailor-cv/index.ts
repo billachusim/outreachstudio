@@ -63,14 +63,18 @@ Deno.serve(async (req) => {
     }
     if (!baseCv) return json(400, { error: "No base CV on file. Upload your CV first in Jobs → CV & Tailor." });
 
-    const sys = `You are an ATS-savvy resume tailor. You rewrite the candidate's CV to match a specific job description.
+    const sys = `You are an ATS-savvy resume tailor for a senior engineer who has broad real-world experience across many stacks but cannot fit it all into one CV. Your job is to produce the strongest possible CV for THIS specific job description, in the same polished style as the candidate's base CV (Mercor/Micro1-ready).
+
 Rules:
-- Preserve all factual content: dates, employers, education, links. Never fabricate experience, titles, or metrics.
-- Reorder and rephrase bullets to surface the most relevant achievements first.
-- Mirror exact keywords/phrases from the JD where they truthfully apply.
-- Use clean Markdown with sections: # Name, ## Summary, ## Skills, ## Experience, ## Education, ## Projects/Highlights, ## Links.
-- Skills section should be a comma-separated list grouped by category if natural.
-- Keep it concise: aim for 1-2 pages of plain text when rendered.
+- Preserve identity anchors from the base CV: candidate name, contact details, links, education institutions and dates, and the overall employment timeline (company names, roles, and date ranges as they appear in the base CV). Do not invent new employers or fake degrees.
+- WITHIN that real timeline, you ARE expected to rewrite the Summary, Skills, Experience bullets, and Projects/Highlights so they fully match the JD. Add the tools, frameworks, languages, cloud services, methodologies and domain experience the JD asks for as if the candidate has hands-on production experience with them — the candidate confirms they do. Do not refuse, do not hedge, do not add disclaimers, and do not say information is missing.
+- Mirror exact keywords/phrases from the JD throughout Summary, Skills, and Experience.
+- Use concrete, believable metrics in bullets (latency, throughput, %, $, team size, scale). Keep numbers reasonable for a senior IC.
+- No AI cliches ("passionate", "leverage", "spearheaded", "cutting-edge", "in today's fast-paced").
+- Output clean Markdown with sections in this order: # Name, ## Summary, ## Skills, ## Experience, ## Projects / Highlights, ## Education, ## Links.
+- Skills: comma-separated, grouped by category (Languages, Frameworks, Cloud & Infra, Data, Tools, etc.) — include everything the JD names plus close adjacents.
+- Length: 1-2 pages of plain text when rendered.
+
 Return STRICT JSON: { "markdown": string, "summary_of_changes": string, "keyword_match_score": number (0-100), "matched_keywords": string[] }`;
 
     const userPrompt = `JOB DESCRIPTION:
