@@ -88,8 +88,12 @@ Deno.serve(async (req) => {
 `CANDIDATE PROFILE (memory):
 ${profile.slice(0, 3500)}
 
+JOB-APPLICATION PROFILE (saved answers from prior applications — PREFER these for matching fields):
+${jobProfile.slice(0, 3000)}
+
 BASE CV (markdown):
 ${baseCv.slice(0, 4000)}
+
 
 CANDIDATE NAME (fallback): ${prof?.display_name ?? ""}
 
