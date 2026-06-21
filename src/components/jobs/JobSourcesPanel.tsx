@@ -26,6 +26,27 @@ export const JobSourcesPanel = () => {
   const [kind, setKind] = useState<Kind>("job_board");
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [lastScans, setLastScans] = useState<Record<string, { fetched: number; kept_new: number; level: string; at: string }>>({});
+
+  const loadDiagnostics = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("run_events")
+      .select("level, message, created_at")
+      .eq("user_id", user.id)
+      .eq("kind", "scan_jobs")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    const map: Record<string, { fetched: number; kept_new: number; level: string; at: string }> = {};
+    for (const ev of (data ?? []) as Array<{ level: string; message: string; created_at: string }>) {
+      const m = ev.message.match(/^source:(.+?)\s+fetched=(\d+)\s+kept_new=(\d+)/);
+      if (!m) continue;
+      const nm = m[1].trim();
+      if (map[nm]) continue; // keep most recent
+      map[nm] = { fetched: Number(m[2]), kept_new: Number(m[3]), level: ev.level, at: ev.created_at };
+    }
+    setLastScans(map);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -36,6 +57,7 @@ export const JobSourcesPanel = () => {
     if (error) toast.error(error.message);
     setSources((data as Source[]) ?? []);
     setLoading(false);
+    loadDiagnostics();
   };
 
   useEffect(() => { load(); }, [user?.id]);
@@ -77,6 +99,19 @@ export const JobSourcesPanel = () => {
     setSources((p) => p.filter((x) => x.id !== s.id));
   };
 
+  const scanSummary = (nm: string) => {
+    const s = lastScans[nm];
+    if (!s) return null;
+    const hint = s.fetched === 0
+      ? " · likely requires login or no listings extractable"
+      : s.kept_new === 0 ? " · all duplicates" : "";
+    return (
+      <p className={`text-[11px] mt-0.5 ${s.level === "warn" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+        Last scan: fetched {s.fetched}, kept {s.kept_new}{hint}
+      </p>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <Card>
@@ -96,6 +131,7 @@ export const JobSourcesPanel = () => {
                 <div>
                   <p className="font-medium">{d.name}</p>
                   <p className="text-xs text-muted-foreground">{d.url}</p>
+                  {scanSummary(d.name)}
                 </div>
                 <Badge variant="secondary">Default</Badge>
               </li>
@@ -151,6 +187,7 @@ export const JobSourcesPanel = () => {
                       <Badge variant="outline" className="text-[10px] capitalize">{s.kind.replace("_", " ")}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{s.url}</p>
+                    {scanSummary(s.name)}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <Switch checked={s.enabled} onCheckedChange={() => toggle(s)} />

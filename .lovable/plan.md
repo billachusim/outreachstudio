@@ -1,70 +1,43 @@
-# Plan: Dedicated Jobs page + CV tailoring
+## How matches are currently found
 
-## Goal
-Pull every job-hunt feature out of Dashboard / Intel / Memory into one **Jobs** hub, leaving the main Dashboard with a compact summary widget. Add a new "Tailor CV to a job description" tool.
+`supabase/functions/scan-jobs/index.ts` runs Firecrawl JSON extraction against:
 
-## 1. New route: `/jobs`
+1. Two hard-coded defaults: **Remote OK** and **We Work Remotely**.
+2. Your `intel_sources` rows where `kind = 'job_board'` AND `enabled = true`.
 
-Add `Jobs` to the sidebar (between Campaigns and Leads) with a briefcase icon. Mobile tab bar stays as-is.
+Each extracted posting is scored by Lovable AI against your freelance profile + offering, then upserted into `job_posts` with a `source` column already holding the board's name. Rows scoring ≥ 60 also get mirrored into `leads` under the `job_hunt` campaign.
 
-The page is tabbed:
+## Why you don't see jobs from MicroOne / Macro etc.
 
+Two likely reasons, both fixable:
+
+1. **They were added as `talent_marketplace`, not `job_board`.** The scanner's query (`scan-jobs/index.ts` line 104) filters `kind = 'job_board'`, so marketplace sources are silently skipped.
+2. **Login-walled listing pages.** Firecrawl scrapes anonymously. Marketplaces that require an account return a login page → 0 extracted jobs. We have no per-source diagnostic surfaced today, so it looks like "nothing happened".
+
+## What I'll change (UI + scanner, no auto-apply work)
+
+### 1. Show the source on every match
+`JobMatchesList.tsx`: add a small **source badge** next to the title (uses the existing `source` column) and a **Source filter dropdown** alongside the search / min-score / status filters. Source list is derived from the loaded posts. The hostname link stays — it's the actual posting URL, separate from the board name.
+
+### 2. Let custom marketplace sources actually run
+`scan-jobs/index.ts`: change the source query to include `kind IN ('job_board', 'talent_marketplace')` so MicroOne / Macro / etc. are scraped on the next run. Each posting keeps the source name you typed when adding it, so they'll show up in the new filter.
+
+### 3. Per-source scan diagnostics
+In `scan-jobs/index.ts`, log per-source `{ name, fetched, kept_new }` to `run_events` (already used elsewhere in the project) and surface a tiny **"Last scan"** summary under each row in `JobSourcesPanel.tsx`:
+
+```text
+MicroOne — 0 jobs found (likely requires login)
+Macro     — 12 jobs found, 3 new
 ```
-[ Overview ] [ Matches ] [ Sources ] [ CV & Tailor ] [ Pipeline ]
-```
 
-- **Overview** — KPIs (scanned, matched, drafted, sent, replies, interviews), today's email budget split, recent activity.
-- **Matches** — full list of `job_posts` with score ≥ 60 (currently truncated in `JobHuntPanel`). Filters: score, source, posted date, status (new / drafted / applied / replied). "Generate draft" + "Re-draft" + "Open application" actions inline. Bulk select → bulk draft.
-- **Sources** — moves the job-board / talent-marketplace portion of `IntelSources` here (filtered to `kind in ('job_board','talent_marketplace')`), plus "Scan jobs now" button and per-source last-scan stats from `aggregator_performance`.
-- **CV & Tailor** — see section 3.
-- **Pipeline** — Kanban-ish view of leads in the Job Hunt campaign by status (drafted → sent → opened → replied → interview), reusing existing `leads` + `pitch_events` data.
+That makes it obvious which sources are productive vs login-walled, so you know which to keep and which to drop, and you can match the badge on the Matches tab to the account you already have on that site.
 
-## 2. Shrink the Dashboard widget
+### Out of scope (per your message)
+- No auto-apply / form-filling work. The existing Apply Kit stays as the copy-paste workflow.
 
-Replace today's expanded `JobHuntPanel` on `/` with a compact card:
-- One-line stats row: `Scanned 37 · Matched 18 · Drafts 3 · Sent today 12/40`.
-- Top 3 newest high-score matches with a one-click "Draft" button.
-- "Open Jobs hub →" link to `/jobs`.
+## Files touched
 
-Refactor: extract the heavy sections of `JobHuntPanel.tsx` into `src/components/jobs/JobMatchesList.tsx`, `JobStatsHeader.tsx`, etc. Dashboard imports only the compact summary; `/jobs` imports the full set.
-
-## 3. CV tailoring tool (new)
-
-UI on the **CV & Tailor** tab:
-- **Base CV**: shows the current uploaded CV from `resumes` bucket (moved from Memory). Re-upload supported.
-- **Tailor to a job**: two inputs — paste job description *or* pick from existing `job_posts`. Optional company name / role.
-- Button **Generate tailored CV** → calls new edge function `tailor-cv`.
-- Output panel: rendered Markdown CV, with **Copy**, **Download .md**, **Download .pdf**, **Download .docx**, and **Save to job post** (attaches as `job_posts.tailored_cv_md` so the next "Generate draft" uses it).
-
-New edge function `supabase/functions/tailor-cv/index.ts`:
-1. Auth-check JWT, load user's base CV text from storage (or stored `profiles.cv_text`).
-2. Load JD text (from body or `job_posts.id`).
-3. Call Lovable AI (`google/gemini-2.5-pro`) with a structured prompt: rewrite/reorder bullets, surface matching keywords, keep facts truthful, output Markdown sections (Summary, Skills, Experience, Education, Projects).
-4. Return `{ markdown, summary_of_changes, keyword_match_score }`.
-5. PDF/DOCX rendering is done client-side (`jspdf` / `docx` npm) to avoid heavy function deps. Markdown → HTML → PDF.
-
-Schema additions (one migration):
-- `job_posts`: add `tailored_cv_md text`, `tailored_cv_updated_at timestamptz`.
-- `profiles`: add `base_cv_md text` (cached parsed CV so tailoring is fast and doesn't re-OCR every time). Populated by existing `ingest-cv` function — small edit to also persist the extracted text here.
-
-## 4. Cleanup
-
-After `/jobs` ships and is verified:
-- **Dashboard** (`src/pages/Dashboard.tsx`): replace full `JobHuntPanel` with the new compact `JobsSummaryCard`.
-- **Intel** (`src/pages/Intel.tsx`): keep news-only. Remove job_board scan triggers / job-specific UI; add a small "Looking for jobs? Go to Jobs →" link.
-- **IntelSources** (`src/pages/IntelSources.tsx`): filter the form's "Kind" select to `news` only; route `job_board` / `talent_marketplace` management to `/jobs?tab=sources`. Keep existing rows visible (read-only) with a "Manage in Jobs" link, then drop after migration.
-- **Memory** (`src/pages/Memory.tsx`): remove `CvUploadCard`; replace with a pointer card "CV lives in Jobs → CV & Tailor". Keep agent-memory features intact.
-
-No data migration needed — existing `job_posts`, `intel_sources(kind=job_board)`, and the `resumes` bucket all stay where they are; only the UI moves.
-
-## 5. Out of scope (call out, don't build now)
-- Auto-tailoring every draft (we'll wire it as an opt-in toggle on the Jobs page once the manual flow is validated).
-- Multi-CV profiles (e.g. one CV per role family) — easy follow-up once `profiles.base_cv_md` exists.
-
-## Technical summary
-- **New files**: `src/pages/Jobs.tsx`, `src/components/jobs/{JobsSummaryCard,JobMatchesList,JobStatsHeader,JobSourcesPanel,CvTailorPanel,JobPipelineBoard}.tsx`, `supabase/functions/tailor-cv/index.ts`, one migration.
-- **Edited**: `src/App.tsx` (route), `src/components/AppSidebar.tsx` (nav item), `src/pages/Dashboard.tsx`, `src/pages/Intel.tsx`, `src/pages/IntelSources.tsx`, `src/pages/Memory.tsx`, `supabase/functions/ingest-cv/index.ts` (persist parsed text).
-- **Deps**: add `jspdf`, `docx`, `marked` for client-side export.
-
-## Open question
-For PDF export styling — should the tailored CV match a template you like (clean single-column, classic two-column, or mirror the look of the CV you uploaded)? Default plan: clean single-column ATS-friendly layout.
+- `src/components/jobs/JobMatchesList.tsx` — source badge + source filter
+- `src/components/jobs/JobSourcesPanel.tsx` — per-source last-scan summary
+- `supabase/functions/scan-jobs/index.ts` — include `talent_marketplace`, write per-source `run_events`
+- (no schema change; `source` and `run_events` already exist)

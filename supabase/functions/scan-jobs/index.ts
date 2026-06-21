@@ -96,30 +96,47 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
   for (const camp of campaigns) {
     const userId = camp.user_id;
 
-    // Per-user job_board sources + defaults
+    // Per-user job sources (boards + marketplaces) + built-in defaults
     const { data: customSrcs } = await supabase
       .from("intel_sources")
-      .select("name, url")
+      .select("name, url, kind")
       .eq("user_id", userId)
-      .eq("kind", "job_board")
+      .in("kind", ["job_board", "talent_marketplace"])
       .eq("enabled", true);
 
     const sources = [
-      ...DEFAULT_JOB_BOARDS,
-      ...((customSrcs ?? []).map((s: any) => ({ name: s.name, url: s.url }))),
+      ...DEFAULT_JOB_BOARDS.map((d) => ({ ...d, kind: "job_board" as const })),
+      ...((customSrcs ?? []).map((s: any) => ({ name: s.name, url: s.url, kind: s.kind as string }))),
     ];
 
-    // Scrape all boards
+    const logEvent = (level: "info" | "warn", message: string) => {
+      supabase.from("run_events").insert({
+        user_id: userId, kind: "scan_jobs", level, message,
+      }).then(() => {}, () => {});
+    };
+
+    // Scrape all sources
     const settled = await Promise.allSettled(
       sources.map((s) => firecrawlScrapeJobs(s.url, FIRECRAWL_API_KEY).then((jobs) => ({ s, jobs }))),
     );
     const allJobs: Array<JobItem & { source: string }> = [];
+    const perSource: Array<{ name: string; fetched: number; kept_new: number }> = [];
     for (const r of settled) {
       if (r.status === "fulfilled") {
         for (const j of r.value.jobs) allJobs.push({ ...j, source: r.value.s.name });
+        perSource.push({ name: r.value.s.name, fetched: r.value.jobs.length, kept_new: 0 });
+      } else {
+        // Source failed entirely (network / firecrawl error)
+        logEvent("warn", `source-failed: ${r.reason?.message ?? "unknown error"}`);
       }
     }
-    if (allJobs.length === 0) continue;
+    if (allJobs.length === 0) {
+      for (const ps of perSource) {
+        const hint = ps.fetched === 0 ? " (likely requires login or no listings extractable)" : "";
+        logEvent(ps.fetched === 0 ? "warn" : "info", `source:${ps.name} fetched=${ps.fetched} kept_new=0${hint}`);
+      }
+      continue;
+    }
 
     // Dedupe vs existing
     const urls = allJobs.map((j) => j.url);
@@ -127,7 +144,17 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
       .from("job_posts").select("url").eq("user_id", userId).in("url", urls);
     const existingSet = new Set((existing ?? []).map((e: any) => e.url));
     const fresh = allJobs.filter((j) => !existingSet.has(j.url));
-    if (fresh.length === 0) continue;
+    // Tally per-source kept_new
+    for (const j of fresh) {
+      const ps = perSource.find((p) => p.name === j.source);
+      if (ps) ps.kept_new += 1;
+    }
+    if (fresh.length === 0) {
+      for (const ps of perSource) {
+        logEvent("info", `source:${ps.name} fetched=${ps.fetched} kept_new=0 (all duplicates)`);
+      }
+      continue;
+    }
 
     // Pull profile memory + offering
     const [memRes, offRes] = await Promise.all([
@@ -272,6 +299,13 @@ async function runScan(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_KEY
       });
       if (lerr) console.error("scan-jobs lead insert error", lerr);
       else totalLeads++;
+    }
+
+    // Per-source summary for the diagnostics panel
+    for (const ps of perSource) {
+      const hint = ps.fetched === 0 ? " (likely requires login or no listings extractable)" : "";
+      logEvent(ps.fetched === 0 ? "warn" : "info",
+        `source:${ps.name} fetched=${ps.fetched} kept_new=${ps.kept_new}${hint}`);
     }
   }
 
