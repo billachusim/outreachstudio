@@ -116,7 +116,19 @@ Write an application. Return JSON:
       if (!error && pitch) pitchId = pitch.id;
     }
 
-    await supabase.from("job_posts").update({ status: "drafted" }).eq("id", job_post_id);
+    const draftPayload = {
+      subject: out.subject || `Application: ${job.title}`,
+      cover_letter: out.cover_letter ?? "",
+      tailored_bullets: out.tailored_bullets ?? [],
+      apply_email: job.apply_email,
+      apply_url: job.apply_url,
+      pitch_id: pitchId,
+    };
+    await supabase.from("job_posts").update({
+      status: "drafted",
+      draft: draftPayload,
+      draft_updated_at: new Date().toISOString(),
+    }).eq("id", job_post_id);
 
     return json(200, {
       ok: true,
