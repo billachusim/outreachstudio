@@ -105,7 +105,10 @@ async function runScanJob(supabase: any, FIRECRAWL_API_KEY: string, LOVABLE_API_
     const defaultArticles = await scrapeMany(DEFAULT_SOURCES, FIRECRAWL_API_KEY);
 
     const { data: users } = await supabase.from("offerings").select("user_id");
-    const userIds = Array.from(new Set((users ?? []).map((u: any) => u.user_id)));
+    const allIds = Array.from(new Set((users ?? []).map((u: any) => u.user_id))) as string[];
+    // Skip dormant users to avoid burning AI credits on inactive accounts.
+    const { filterActiveUsers } = await import("../_shared/active-user.ts");
+    const userIds = await filterActiveUsers(supabase, allIds, 14);
 
     let totalInserted = 0;
     let totalAutoLeads = 0;

@@ -3,6 +3,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { buildProposal, runLaunch } from "../_shared/launch.ts";
+import { filterActiveUsers } from "../_shared/active-user.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -52,7 +53,11 @@ Deno.serve(async (req) => {
 
     const results: Array<{ userId: string; intelId: string; status: string; error?: string; campaignId?: string }> = [];
 
+    // Skip dormant users to avoid burning AI credits on inactive accounts.
+    const activeIds = new Set(await filterActiveUsers(admin, Array.from(perUser.keys()), 14));
+
     for (const [userId, userItems] of perUser) {
+      if (!activeIds.has(userId)) continue;
       for (const intel of userItems!) {
         try {
           const built = await buildProposal(admin, userId, {

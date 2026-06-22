@@ -270,7 +270,9 @@ Deno.serve(async (req) => {
     } else {
       const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase.from("leads").select("user_id").gte("updated_at", since);
-      userIds = Array.from(new Set((data ?? []).map((r: any) => r.user_id)));
+      const allIds = Array.from(new Set((data ?? []).map((r: any) => r.user_id))) as string[];
+      const { filterActiveUsers } = await import("../_shared/active-user.ts");
+      userIds = force ? allIds : await filterActiveUsers(supabase, allIds, 14);
     }
 
     const results = [];

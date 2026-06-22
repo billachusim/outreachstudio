@@ -2,6 +2,7 @@
 // Cron at 08:00 WAT. Idempotent per user/date unless `force: true` is passed.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.0";
+import { filterActiveUsers } from "../_shared/active-user.ts";
 
 const json = (s: number, p: unknown) =>
   new Response(JSON.stringify(p), { status: s, headers: { "Content-Type": "application/json" } });
@@ -20,7 +21,9 @@ async function runBriefingJob(supabase: any, LOVABLE_API_KEY: string, force: boo
     } catch (e) { console.error("daily-briefing: budget alloc failed", e); }
 
     const { data: users } = await supabase.from("campaigns").select("user_id");
-    const userIds = Array.from(new Set((users ?? []).map((u: any) => u.user_id)));
+    const allIds = Array.from(new Set((users ?? []).map((u: any) => u.user_id))) as string[];
+    // Skip dormant users to avoid burning AI credits on inactive accounts.
+    const userIds = force ? allIds : await filterActiveUsers(supabase, allIds, 14);
     const today = new Date().toISOString().slice(0, 10);
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 

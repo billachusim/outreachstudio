@@ -1,43 +1,57 @@
-## How matches are currently found
+# Credit-burn audit & reduction plan
 
-`supabase/functions/scan-jobs/index.ts` runs Firecrawl JSON extraction against:
+## What's running today
 
-1. Two hard-coded defaults: **Remote OK** and **We Work Remotely**.
-2. Your `intel_sources` rows where `kind = 'job_board'` AND `enabled = true`.
+13 active cron jobs (all hitting AI gateway + Firecrawl in various ways):
 
-Each extracted posting is scored by Lovable AI against your freelance profile + offering, then upserted into `job_posts` with a `source` column already holding the board's name. Rows scoring ≥ 60 also get mirrored into `leads` under the `job_hunt` campaign.
+| Job | Schedule | AI calls per run | Firecrawl per run | Notes |
+|---|---|---|---|---|
+| campaign-tick | every 2 min | 1 per due lead × users | none | Heaviest tick — runs 720×/day even when nothing is due |
+| follow-up-tick | every 10 min | up to 5 (1 per due seq) | none | 144×/day |
+| gmail-reply-sync | every 10 min | 1 per new reply (classify-reply) | none | 144×/day; AI only on new mail |
+| scan-jobs | every 3 hours | ~1 per source (flash-lite) | 1 scrape per source | **8×/day** — biggest scheduled spend |
+| scan-intel | daily 6am | ~1 per 20 articles (flash-lite) | 3 defaults + user sources | OK |
+| auto-launch-top-triggers | daily 6am | varies (drafts pitches) | none | Can fan out many drafts |
+| draft-social-from-intel | daily 5:30am | 1 per top intel item (flash) | none | OK |
+| **daily-briefing-8am-wat** | daily 7am | 1 (flash-lite) | none | **Duplicate of next row** |
+| **daily-briefing-morning** | daily 7am | 1 (flash-lite) | none | **Same function, same time — runs twice** |
+| daily-journal-nightly | daily 9:30pm | 1 | none | OK |
+| cleanup-intel | daily 4am | 0 | none | Free |
+| score-leads-nightly | daily 2am | 0 (DB only) | none | Free |
+| weekly-intel-digest | weekly Sun 5pm | small | none | OK |
 
-## Why you don't see jobs from MicroOne / Macro etc.
+Models in use: mostly `gemini-2.5-flash` and `gemini-2.5-flash-lite` (cheap). Only `tailor-cv` and `apply-assistant` use `gemini-2.5-pro` — those are user-triggered, not cron.
 
-Two likely reasons, both fixable:
+## Where the burn actually comes from
 
-1. **They were added as `talent_marketplace`, not `job_board`.** The scanner's query (`scan-jobs/index.ts` line 104) filters `kind = 'job_board'`, so marketplace sources are silently skipped.
-2. **Login-walled listing pages.** Firecrawl scrapes anonymously. Marketplaces that require an account return a login page → 0 extracted jobs. We have no per-source diagnostic surfaced today, so it looks like "nothing happened".
+1. **Duplicate daily-briefing cron** — same function fires twice every morning. Pure waste.
+2. **scan-jobs every 3 hours** — job boards don't change that fast; 8 Firecrawl scrapes per source per day is the largest scheduled Firecrawl cost.
+3. **campaign-tick every 2 minutes** — fine when you're actively running campaigns, wasteful when idle (still queries DB 720×/day; emits 0 AI calls when nothing's due, so cost is low but it's the noisiest job).
+4. **No "is this user active?" gate** on daily jobs — they run for every user with offerings even if you haven't opened the app in weeks.
+5. **scan-intel + auto-launch-top-triggers + draft-social-from-intel** all fire on the same morning window and can fan out many AI drafts per user per day.
 
-## What I'll change (UI + scanner, no auto-apply work)
+## Proposed changes (cron only — no app behavior change unless noted)
 
-### 1. Show the source on every match
-`JobMatchesList.tsx`: add a small **source badge** next to the title (uses the existing `source` column) and a **Source filter dropdown** alongside the search / min-score / status filters. Source list is derived from the loaded posts. The hostname link stays — it's the actual posting URL, separate from the board name.
+1. **Remove the duplicate** `daily-briefing-8am-wat` (keep `daily-briefing-morning`). −50% briefing cost immediately.
+2. **scan-jobs: every 3h → every 12h** (e.g. `0 6,18 * * *`). Cuts Firecrawl scrape volume by 4×. Manual "Scan now" button stays available in the Jobs page.
+3. **campaign-tick: every 2 min → every 5 min**. Worst case: 3 extra minutes of delay before an email goes out. Cuts cron invocations by 60%.
+4. **follow-up-tick: every 10 min → every 30 min**. Follow-ups are not time-critical to the minute.
+5. **Add an "active user" gate** to `scan-intel`, `auto-launch-top-triggers`, `draft-social-from-intel`, `daily-briefing`, `daily-journal`, `weekly-intel-digest`: skip any user with no app activity (no `run_events`, no `pitches`, no logged-in session) in the last 14 days. One-line query at the top of each loop.
+6. **Cap fan-out on auto-launch-top-triggers**: hard limit to top N=3 triggers per user per day (currently unbounded), so a noisy intel day can't draft 20 pitches in one go.
 
-### 2. Let custom marketplace sources actually run
-`scan-jobs/index.ts`: change the source query to include `kind IN ('job_board', 'talent_marketplace')` so MicroOne / Macro / etc. are scraped on the next run. Each posting keeps the source name you typed when adding it, so they'll show up in the new filter.
-
-### 3. Per-source scan diagnostics
-In `scan-jobs/index.ts`, log per-source `{ name, fetched, kept_new }` to `run_events` (already used elsewhere in the project) and surface a tiny **"Last scan"** summary under each row in `JobSourcesPanel.tsx`:
-
-```text
-MicroOne — 0 jobs found (likely requires login)
-Macro     — 12 jobs found, 3 new
-```
-
-That makes it obvious which sources are productive vs login-walled, so you know which to keep and which to drop, and you can match the badge on the Matches tab to the account you already have on that site.
-
-### Out of scope (per your message)
-- No auto-apply / form-filling work. The existing Apply Kit stays as the copy-paste workflow.
+Optional (ask before doing):
+- Disable `auto-launch-top-triggers` entirely and require manual launch from the Intel page. Biggest single saver if you don't want auto-drafting at all.
+- Switch `draft-social-from-intel` and `draft-pitch-from-intel` from `flash` → `flash-lite` (good enough for short drafts; ~5× cheaper per call).
 
 ## Files touched
 
-- `src/components/jobs/JobMatchesList.tsx` — source badge + source filter
-- `src/components/jobs/JobSourcesPanel.tsx` — per-source last-scan summary
-- `supabase/functions/scan-jobs/index.ts` — include `talent_marketplace`, write per-source `run_events`
-- (no schema change; `source` and `run_events` already exist)
+- New migration: `cron.unschedule('daily-briefing-8am-wat')` + reschedule `scan-jobs-every-3h`, `campaign-tick-every-2min`, `follow-up-tick-every-10min` with new names + cadences.
+- `supabase/functions/scan-intel/index.ts`, `auto-launch-top-triggers/index.ts`, `draft-social-from-intel/index.ts`, `daily-briefing/index.ts`, `daily-journal/index.ts`, `weekly-intel-digest/index.ts` — add active-user gate helper.
+- `supabase/functions/auto-launch-top-triggers/index.ts` — add `LIMIT 3` cap.
+
+## Out of scope
+
+- Per-user budget UI (you already have `email_budgets`; AI-credit budget is a bigger feature).
+- Changing on-demand functions (`tailor-cv`, `apply-assistant`, `draft-application`) — those only run when you click a button.
+
+Want me to also flip the two optional items (kill `auto-launch-top-triggers`, downgrade draft models to flash-lite)?
