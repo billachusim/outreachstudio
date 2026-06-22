@@ -102,8 +102,13 @@ Deno.serve(async (req) => {
       const byUser: Record<string, any[]> = {};
       for (const it of items ?? []) (byUser[it.user_id] ||= []).push(it);
 
+      // Skip dormant users to avoid burning AI credits on inactive accounts.
+      const { filterActiveUsers } = await import("../_shared/active-user.ts");
+      const activeIds = new Set(await filterActiveUsers(supabase, Object.keys(byUser), 14));
+
       let drafted = 0;
       for (const [userId, userItems] of Object.entries(byUser)) {
+        if (!activeIds.has(userId)) continue;
         const top = userItems.slice(0, 2);
         for (const it of top) {
           // skip if any draft already exists for this intel (any platform)

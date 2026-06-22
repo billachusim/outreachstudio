@@ -49,9 +49,14 @@ Deno.serve(async (req) => {
     const { data: users } = await supabase.auth.admin.listUsers();
     const userList = users?.users ?? [];
 
+    // Skip dormant users to avoid burning AI credits on inactive accounts.
+    const { filterActiveUsers } = await import("../_shared/active-user.ts");
+    const activeIds = new Set(await filterActiveUsers(supabase, userList.map((u: any) => u.id), 14));
+
     let sent = 0;
     for (const u of userList) {
       if (!u.email) continue;
+      if (!activeIds.has(u.id)) continue;
       const { data: items } = await supabase
         .from("intel_items").select("title, url, source, relevance_score, acted_on, linked_lead_id, linked_pitch_id, created_at")
         .eq("user_id", u.id).gte("created_at", since)
