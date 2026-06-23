@@ -131,14 +131,30 @@ const Inbox = () => {
   const load = async () => {
     if (!user) return;
     setLoading(true);
-    const [pitchesRes, eventsRes, msgsRes, leadsRes] = await Promise.all([
+    const [pitchesRes, eventsRes, msgsRes] = await Promise.all([
       supabase.from("pitches").select("id,subject,body,sent_at,lead_id").not("sent_at", "is", null).order("sent_at", { ascending: false }).limit(500),
       supabase.from("pitch_events").select("*").order("occurred_at", { ascending: false }).limit(500),
       supabase.from("channel_messages").select("*").order("created_at", { ascending: false }).limit(500),
-      supabase.from("leads").select("id,business_name,contact_email,phone,status,reply_intent,score,last_activity_at"),
     ]);
+
+    // Fetch only leads referenced by loaded activity (chunked) to avoid
+    // PostgREST's 1000-row cap that otherwise makes some threads render
+    // as "(deleted lead)" when the user has >1000 leads total.
+    const referencedIds = new Set<string>();
+    ((pitchesRes.data as Pitch[]) ?? []).forEach((p) => p.lead_id && referencedIds.add(p.lead_id));
+    ((eventsRes.data as PitchEvent[]) ?? []).forEach((e) => e.lead_id && referencedIds.add(e.lead_id));
+    ((msgsRes.data as ChannelMsg[]) ?? []).forEach((m) => m.lead_id && referencedIds.add(m.lead_id));
+
     const leadsMap = new Map<string, Lead>();
-    ((leadsRes.data as Lead[]) ?? []).forEach((l) => leadsMap.set(l.id, l));
+    const idList = Array.from(referencedIds);
+    for (let i = 0; i < idList.length; i += 500) {
+      const chunk = idList.slice(i, i + 500);
+      const { data } = await supabase
+        .from("leads")
+        .select("id,business_name,contact_email,phone,status,reply_intent,score,last_activity_at")
+        .in("id", chunk);
+      ((data as Lead[]) ?? []).forEach((l) => leadsMap.set(l.id, l));
+    }
 
     const byLead = new Map<string, ThreadItem[]>();
     const push = (id: string, item: ThreadItem) => {
