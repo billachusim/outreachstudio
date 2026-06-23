@@ -119,6 +119,7 @@ const Dashboard = () => {
     setSentToday(sentRes.count ?? 0);
     setBriefing((briefingRes.data as Briefing) ?? null);
     setReplySync((syncRes.data as SyncTick) ?? null);
+    setBriefingActions((actionsRes.data as BriefingAction[]) ?? []);
 
     const f = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
     ((eventsFunnelRes.data as { event_type: string }[]) ?? []).forEach((e) => {
