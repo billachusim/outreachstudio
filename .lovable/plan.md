@@ -1,30 +1,53 @@
-# Inbox "(deleted lead)" fix
+## Problem
 
-## Root cause
+Two rules are choking sends today:
 
-In `src/pages/Inbox.tsx`, threads are built from `pitches`, `pitch_events`, and `channel_messages`, then each thread's lead is looked up in a map populated by:
+1. **Job-hunt reservation.** Daily budget is split 60 outreach / 25 job-hunt / 15 flex. We never actually email for jobs (you apply manually), so 25–40 emails/day are sitting unused.
+2. **Top-3 priority gate.** When more than 3 outreach campaigns are active, anything outside today's top 3 (by intel score) gets paused with "Lower priority than today's top 3 campaigns. Resumes tomorrow." With many intel-spawned campaigns, most get frozen.
 
-```ts
-supabase.from("leads").select("id,business_name,contact_email,phone,status,reply_intent,score,last_activity_at")
-```
+Together that's why no email went out today.
 
-That query has no `.limit()`, and PostgREST caps responses at **1000 rows by default**. Your account has **8,676 leads** but only **~358 distinct leads** appear in pitches and ~16 in messages. The 1000-row cap is applied in lead-table order (effectively most-recent or arbitrary), so any thread whose lead isn't in that first 1000-row page renders as `(deleted lead)` even though the lead still exists.
+## What changes
 
-Database check confirms **zero orphaned rows** across `pitches`, `pitch_events`, and `channel_messages` — no leads were actually deleted. `pitches.lead_id` is also `ON DELETE CASCADE`, so a real deletion would remove the pitch entirely, not leave a dangling reference.
+### 1. All 100 emails/day go to outreach
 
-## Fix
+- `email_budgets`: `outreach_cap = 100`, `jobhunt_cap = 0` for every user, every day.
+- `_shared/email-budget.ts`:
+  - Remove the bucket split. `checkBudget` only enforces the global 100/day ceiling against `outreach_sent`.
+  - If a `job_hunt` campaign somehow tries to send, return `ok: false` with reason "job-hunt sending is disabled" (defense-in-depth — no job campaigns should be auto-sending).
+- `allocate-email-budget`:
+  - Drop the intel-vs-jobpost signal comparison and the flex math entirely.
+  - Each morning just upsert `outreach_cap=100, jobhunt_cap=0` (unless the row has `notes='override'`).
+- `daily-briefing` still calls `allocate-email-budget` once a morning — no change there.
 
-Stop fetching the entire leads table. Instead, after collecting `lead_id`s referenced by the loaded pitches / events / messages, fetch just those leads by id:
+### 2. Share the 100 across intel-spawned campaigns by ranking
 
-1. Run the three activity queries first (`pitches`, `pitch_events`, `channel_messages`) as today.
-2. Collect the distinct `lead_id`s referenced across all three result sets.
-3. Fetch leads with `.in("id", ids)` — chunked into batches of 500 ids to stay under URL-length limits — instead of selecting the whole table.
-4. Build `leadsMap` from the chunked results and proceed unchanged.
+Replace the "top 3 campaigns/day" gate in `campaign-tick` with a per-campaign daily share derived from intel relevance.
 
-This makes the lookup correct regardless of how many total leads the user has, and is also cheaper (we no longer pull thousands of rows we don't render).
+For each tick on an outreach campaign:
 
-## Scope
+1. Load all `active` outreach campaigns for the user.
+2. For each, look up the max `intel_items.relevance_score` where `spawned_campaign_id = campaign.id`. Manual campaigns (no intel link) get a baseline score of 50.
+3. Compute weights: `weight = max(score, 10)` so nothing is zero.
+4. `share = max(5, floor(100 * weight / sum_of_weights))` — every active campaign gets at least 5/day so nothing starves; high-ranked intel campaigns get a bigger slice.
+5. Cap `share` at the remaining global budget (`100 - outreach_sent_today`) and at the existing per-campaign `effectiveCap` (channel cap).
+6. If this campaign has already sent `>= share` today, pause it with "Daily share reached (X/share). Resumes tomorrow." Otherwise proceed to draft/send.
 
-- Edit only `src/pages/Inbox.tsx` (the `load` function).
-- No schema changes, no edge function changes, no behavior change for users beyond the names appearing correctly.
-- Leaves the existing realtime subscriptions and filtering logic untouched.
+This removes the binary "top-3 only" cliff. Twenty active intel campaigns with similar scores would each get ~5; one dominant high-score campaign would get the lion's share.
+
+### 3. UI copy
+
+`src/pages/Dashboard.tsx` and any budget chip that shows "Outreach 60 · Jobs 25 · Flex 15" → "Outreach 100 · Jobs 0 (manual)". Only relabel; no behavioral changes here.
+
+## Files touched
+
+- `supabase/functions/_shared/email-budget.ts` — collapse to single 100-cap check.
+- `supabase/functions/allocate-email-budget/index.ts` — hard-set 100/0.
+- `supabase/functions/campaign-tick/index.ts` — replace top-N gate (lines ~573–636) with the per-campaign share calc above.
+- `src/pages/Dashboard.tsx` — label-only update if budget chip is shown.
+- Migration to backfill today's `email_budgets` rows to `outreach_cap=100, jobhunt_cap=0` so the change takes effect immediately (not just tomorrow).
+
+## Out of scope
+
+- Job board UI and `scan-jobs` keep working as-is — you still see job opportunities.
+- No changes to follow-ups, intel ingestion, or the briefing agent.
