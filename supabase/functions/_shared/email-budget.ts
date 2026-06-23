@@ -1,17 +1,12 @@
-// Shared helper for the daily Resend send budget split between
-// outreach campaigns (Tech Faculty / paid client work) and the
-// job_hunt track (freelance applications).
+// Shared helper for the daily Resend send budget.
 //
-// One `email_budgets` row per user per day. If a row is missing
-// for today, we lazily insert defaults (60 outreach / 25 jobhunt).
-//
-// The hard global ceiling is 100/day (Resend free tier). Defaults
-// reserve 60 + 25 = 85, leaving 15 of "flex" that `allocate-email-budget`
-// distributes once per morning based on intel vs job_post scores.
+// All 100/day go to outreach campaigns. Job-hunt sending is disabled
+// (the user applies to jobs manually), so the jobhunt bucket exists in
+// the schema but is hard-set to 0 and never spent.
 
 export const GLOBAL_DAILY_CAP = 100;
-export const DEFAULT_OUTREACH_CAP = 60;
-export const DEFAULT_JOBHUNT_CAP = 25;
+export const DEFAULT_OUTREACH_CAP = 100;
+export const DEFAULT_JOBHUNT_CAP = 0;
 
 export type BudgetBucket = "outreach" | "jobhunt";
 
@@ -53,7 +48,6 @@ export async function ensureTodayBudget(supabase: any, userId: string): Promise<
     .select("*")
     .single();
   if (error) {
-    // Race: another worker inserted it first — re-read.
     const { data: again } = await supabase
       .from("email_budgets").select("*")
       .eq("user_id", userId).eq("date", date).maybeSingle();
@@ -63,7 +57,7 @@ export async function ensureTodayBudget(supabase: any, userId: string): Promise<
   return created as BudgetRow;
 }
 
-/** Count today's actually-sent pitches per bucket from the source of truth. */
+/** Count today's actually-sent pitches from the source of truth. */
 export async function recountSentToday(
   supabase: any,
   userId: string,
@@ -86,28 +80,25 @@ export async function recountSentToday(
 
 /**
  * Decide whether a campaign in the given mode may send right now.
- * Returns reason string when blocked. Caps are read from email_budgets,
- * actual usage is the live count (so manual sends + agent sends both count).
+ * - Job-hunt mode: always blocked (we don't auto-email for jobs).
+ * - Outreach mode: enforces the single global 100/day cap.
  */
 export async function checkBudget(
   supabase: any,
   userId: string,
   mode: "job_hunt" | "outreach",
 ): Promise<{ ok: true; remaining: number; cap: number } | { ok: false; reason: string; cap: number; sent: number }> {
-  const budget = await ensureTodayBudget(supabase, userId);
+  if (mode === "job_hunt") {
+    return { ok: false, reason: "Job-hunt sending is disabled (apply manually)", cap: 0, sent: 0 };
+  }
   const live = await recountSentToday(supabase, userId);
-
-  // Hard global ceiling regardless of split.
-  if (live.total >= GLOBAL_DAILY_CAP) {
-    return { ok: false, reason: `Global daily cap reached (${live.total}/${GLOBAL_DAILY_CAP})`, cap: GLOBAL_DAILY_CAP, sent: live.total };
+  if (live.outreach_sent >= GLOBAL_DAILY_CAP) {
+    return {
+      ok: false,
+      reason: `Daily cap reached (${live.outreach_sent}/${GLOBAL_DAILY_CAP})`,
+      cap: GLOBAL_DAILY_CAP,
+      sent: live.outreach_sent,
+    };
   }
-
-  const bucket: BudgetBucket = mode === "job_hunt" ? "jobhunt" : "outreach";
-  const cap = bucket === "jobhunt" ? budget.jobhunt_cap : budget.outreach_cap;
-  const sent = bucket === "jobhunt" ? live.jobhunt_sent : live.outreach_sent;
-
-  if (sent >= cap) {
-    return { ok: false, reason: `${bucket} daily cap reached (${sent}/${cap})`, cap, sent };
-  }
-  return { ok: true, remaining: cap - sent, cap };
+  return { ok: true, remaining: GLOBAL_DAILY_CAP - live.outreach_sent, cap: GLOBAL_DAILY_CAP };
 }

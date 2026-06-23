@@ -570,70 +570,83 @@ Notes: ${lead.notes ?? ""}`;
         return json(200, { ok: true, paused: true });
       }
 
-      // Concurrent-campaign quality gate: per bucket. Outreach gets top-3,
-      // job-hunt gets top-2 (smaller bucket, prevents one board flooding).
-      const MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY =
-        campaignMode === "job_hunt" ? 2 : 3;
-      const { data: todaysPitches } = await supabase
+      // Per-campaign daily share, weighted by intel relevance.
+      // Each active outreach campaign gets at least 5/day; high-scoring
+      // intel-spawned campaigns get a bigger slice of the 100/day pool.
+      const GLOBAL_CAP = 100;
+      const MIN_SHARE = 5;
+
+      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      const { data: todaysPitches2 } = await supabase
         .from("pitches")
         .select("lead_id, leads!inner(campaign_id, campaigns!inner(mode))")
         .eq("user_id", run.user_id)
         .gte("sent_at", startOfDay.toISOString());
-      const sentTodayCampaignIds = new Set<string>();
-      for (const p of (todaysPitches ?? []) as any[]) {
+      const sentByCampaign = new Map<string, number>();
+      let outreachSentToday = 0;
+      for (const p of (todaysPitches2 ?? []) as any[]) {
         const cid = p.leads?.campaign_id;
         const mode = p.leads?.campaigns?.mode === "job_hunt" ? "job_hunt" : "outreach";
-        if (cid && mode === campaignMode) sentTodayCampaignIds.add(cid);
+        if (mode !== "outreach" || !cid) continue;
+        outreachSentToday += 1;
+        sentByCampaign.set(cid, (sentByCampaign.get(cid) ?? 0) + 1);
       }
 
-      const allowedToday = new Set<string>(sentTodayCampaignIds);
-      if (allowedToday.size < MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY) {
-        const { data: activeCamps } = await supabase
-          .from("campaigns")
-          .select("id, created_at, mode")
+      const { data: activeCamps } = await supabase
+        .from("campaigns")
+        .select("id, mode")
+        .eq("user_id", run.user_id)
+        .eq("status", "active");
+      const outreachCamps = (activeCamps ?? []).filter(
+        (c: any) => (c.mode === "job_hunt" ? "job_hunt" : "outreach") === "outreach",
+      );
+      const campIds = outreachCamps.map((c: any) => c.id);
+
+      const scoreMap = new Map<string, number>();
+      if (campIds.length > 0) {
+        const { data: intels } = await supabase
+          .from("intel_items")
+          .select("spawned_campaign_id, relevance_score")
           .eq("user_id", run.user_id)
-          .eq("status", "active");
-        const sameMode = (activeCamps ?? []).filter((c: any) =>
-          (c.mode === "job_hunt" ? "job_hunt" : "outreach") === campaignMode
-        );
-        const activeIds = sameMode.map((c: any) => c.id);
-        const candidateIds = activeIds.filter((id: string) => !allowedToday.has(id));
-
-        const scoreMap = new Map<string, number>();
-        if (candidateIds.length > 0) {
-          const { data: intels } = await supabase
-            .from("intel_items")
-            .select("spawned_campaign_id, relevance_score")
-            .eq("user_id", run.user_id)
-            .in("spawned_campaign_id", candidateIds);
-          for (const it of (intels ?? []) as Array<{ spawned_campaign_id: string | null; relevance_score: number | null }>) {
-            if (!it.spawned_campaign_id) continue;
-            const prev = scoreMap.get(it.spawned_campaign_id) ?? 0;
-            const s = it.relevance_score ?? 0;
-            if (s > prev) scoreMap.set(it.spawned_campaign_id, s);
-          }
-        }
-        const createdAt = new Map<string, string>();
-        for (const c of (activeCamps ?? []) as Array<{ id: string; created_at: string }>) {
-          createdAt.set(c.id, c.created_at);
-        }
-        const ranked = candidateIds
-          .map((id) => ({ id, score: scoreMap.get(id) ?? 50, created: createdAt.get(id) ?? "" }))
-          .sort((a, b) => (b.score - a.score) || (b.created.localeCompare(a.created)));
-        for (const r of ranked) {
-          if (allowedToday.size >= MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY) break;
-          allowedToday.add(r.id);
+          .in("spawned_campaign_id", campIds);
+        for (const it of (intels ?? []) as Array<{ spawned_campaign_id: string | null; relevance_score: number | null }>) {
+          if (!it.spawned_campaign_id) continue;
+          const prev = scoreMap.get(it.spawned_campaign_id) ?? 0;
+          const s = it.relevance_score ?? 0;
+          if (s > prev) scoreMap.set(it.spawned_campaign_id, s);
         }
       }
 
-      if (!allowedToday.has(campaign.id)) {
-        await logEvent(
-          "info",
-          `Priority gate: "${campaign.name}" not in today's top ${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY} (by intel score). Pausing until tomorrow.`,
-        );
-        await updateRun({ state: "paused" as never, error: `Lower priority than today's top ${MAX_CONCURRENT_SENDING_CAMPAIGNS_PER_DAY} campaigns. Resumes tomorrow.` });
+      // Weighted shares.
+      const weights = campIds.map((id: string) => ({ id, w: Math.max(scoreMap.get(id) ?? 50, 10) }));
+      const totalW = weights.reduce((s, x) => s + x.w, 0) || 1;
+      const shareMap = new Map<string, number>();
+      for (const { id, w } of weights) {
+        const raw = Math.floor((GLOBAL_CAP * w) / totalW);
+        shareMap.set(id, Math.max(MIN_SHARE, raw));
+      }
+
+      const myShare = shareMap.get(campaign.id) ?? MIN_SHARE;
+      const mySent = sentByCampaign.get(campaign.id) ?? 0;
+      const globalRemaining = Math.max(0, GLOBAL_CAP - outreachSentToday);
+
+      if (globalRemaining === 0) {
+        await logEvent("info", `Global daily cap reached (${outreachSentToday}/${GLOBAL_CAP}). Pausing.`);
+        await updateRun({ state: "paused" as never, error: "Daily cap reached. Resumes tomorrow." });
         return json(200, { ok: true, paused: true });
       }
+      if (mySent >= myShare) {
+        await logEvent(
+          "info",
+          `Daily share reached for "${campaign.name}" (${mySent}/${myShare} of 100). Pausing until tomorrow.`,
+        );
+        await updateRun({
+          state: "paused" as never,
+          error: `Daily share reached (${mySent}/${myShare}). Resumes tomorrow.`,
+        });
+        return json(200, { ok: true, paused: true });
+      }
+
 
 
 
