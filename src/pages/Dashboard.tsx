@@ -43,6 +43,30 @@ type Campaign = { id: string; name: string };
 type Event = { id: string; kind: string; message: string; level: string; created_at: string };
 type Briefing = { id: string; briefing_date: string; body: string; metrics: any; read_at: string | null };
 type SyncTick = { id: string; message: string; level: string; created_at: string };
+type BriefingAction = {
+  id: string;
+  action_type: string;
+  status: string;
+  result: any;
+  payload: any;
+  finished_at: string | null;
+  started_at: string | null;
+  created_at: string;
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  send_followups: "Send queued follow-ups",
+  draft_pitch_for_warm_leads: "Draft pitches for warm leads",
+  launch_campaign_from_intel: "Launch campaign from intel",
+  apply_to_top_jobs: "Apply to top jobs",
+};
+const STATUS_STYLES: Record<string, string> = {
+  pending: "bg-muted text-muted-foreground",
+  running: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  done: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  skipped: "bg-amber-500/15 text-amber-700 dark:text-amber-500",
+  failed: "bg-destructive/15 text-destructive",
+};
 
 const stateColors: Record<string, string> = {
   queued: "bg-muted text-muted-foreground",
@@ -66,6 +90,7 @@ const Dashboard = () => {
   const [funnel, setFunnel] = useState({ sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
   const [generating, setGenerating] = useState(false);
   const [replySync, setReplySync] = useState<SyncTick | null>(null);
+  const [briefingActions, setBriefingActions] = useState<BriefingAction[]>([]);
 
   useEffect(() => { document.title = "Studio · Outreach Studio"; }, []);
 
@@ -75,7 +100,7 @@ const Dashboard = () => {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes, syncRes] = await Promise.all([
+    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes, syncRes, actionsRes] = await Promise.all([
       supabase.from("campaign_runs").select("*").order("updated_at", { ascending: false }).limit(20),
       supabase.from("campaigns").select("id,name"),
       supabase.from("run_events").select("*").order("created_at", { ascending: false }).limit(20),
@@ -83,6 +108,7 @@ const Dashboard = () => {
       supabase.from("daily_briefings").select("*").order("briefing_date", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("pitch_events").select("event_type").gte("occurred_at", since),
       supabase.from("run_events").select("id,message,level,created_at").eq("kind", "gmail-reply-sync").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("briefing_actions").select("id,action_type,status,result,payload,finished_at,started_at,created_at").eq("briefing_date", new Date().toISOString().slice(0, 10)).order("created_at", { ascending: true }),
     ]);
 
     setRuns((runsRes.data as Run[]) ?? []);
@@ -93,6 +119,7 @@ const Dashboard = () => {
     setSentToday(sentRes.count ?? 0);
     setBriefing((briefingRes.data as Briefing) ?? null);
     setReplySync((syncRes.data as SyncTick) ?? null);
+    setBriefingActions((actionsRes.data as BriefingAction[]) ?? []);
 
     const f = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
     ((eventsFunnelRes.data as { event_type: string }[]) ?? []).forEach((e) => {
@@ -113,6 +140,7 @@ const Dashboard = () => {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "run_events" }, load)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "pitch_events" }, load)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "daily_briefings" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "briefing_actions" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -205,6 +233,47 @@ const Dashboard = () => {
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" /> Today's actions
+            <Badge variant="outline" className="text-[10px]">runs daily 6pm WAT</Badge>
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">Agent reads the briefing's next-actions and auto-runs them. Currently active: send queued follow-ups.</p>
+        </CardHeader>
+        <CardContent>
+          {briefingActions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No actions queued yet for today.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {briefingActions.map((a) => {
+                const ts = a.finished_at ?? a.started_at ?? a.created_at;
+                const resultLine = a.status === "done" && a.result
+                  ? `sent ${a.result.sent ?? 0} · skipped ${a.result.skipped ?? 0} · failed ${a.result.failed ?? 0}`
+                  : a.status === "failed"
+                    ? (a.result?.error ?? a.result?.body?.error ?? `http ${a.result?.http ?? "?"}`)
+                    : a.status === "skipped"
+                      ? (a.result?.reason ?? "skipped")
+                      : a.payload?.reason ?? "";
+                return (
+                  <li key={a.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border p-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{ACTION_LABELS[a.action_type] ?? a.action_type}</span>
+                        <Badge className={STATUS_STYLES[a.status] ?? ""}>{a.status}</Badge>
+                      </div>
+                      {resultLine && <div className="mt-1 text-xs text-muted-foreground break-words">{String(resultLine)}</div>}
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{new Date(ts).toLocaleTimeString()}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
 
       <TopTriggersWidget />
 

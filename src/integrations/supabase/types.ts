@@ -86,6 +86,59 @@ export type Database = {
         }
         Relationships: []
       }
+      briefing_actions: {
+        Row: {
+          action_type: string
+          briefing_date: string
+          briefing_id: string | null
+          created_at: string
+          finished_at: string | null
+          id: string
+          payload: Json
+          result: Json | null
+          scheduled_for: string
+          started_at: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          action_type: string
+          briefing_date: string
+          briefing_id?: string | null
+          created_at?: string
+          finished_at?: string | null
+          id?: string
+          payload?: Json
+          result?: Json | null
+          scheduled_for?: string
+          started_at?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          action_type?: string
+          briefing_date?: string
+          briefing_id?: string | null
+          created_at?: string
+          finished_at?: string | null
+          id?: string
+          payload?: Json
+          result?: Json | null
+          scheduled_for?: string
+          started_at?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "briefing_actions_briefing_id_fkey"
+            columns: ["briefing_id"]
+            isOneToOne: false
+            referencedRelation: "daily_briefings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_runs: {
         Row: {
           campaign_id: string
