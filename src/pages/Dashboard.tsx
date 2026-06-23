@@ -90,6 +90,7 @@ const Dashboard = () => {
   const [funnel, setFunnel] = useState({ sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
   const [generating, setGenerating] = useState(false);
   const [replySync, setReplySync] = useState<SyncTick | null>(null);
+  const [briefingActions, setBriefingActions] = useState<BriefingAction[]>([]);
 
   useEffect(() => { document.title = "Studio · Outreach Studio"; }, []);
 
