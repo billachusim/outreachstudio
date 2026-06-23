@@ -43,6 +43,30 @@ type Campaign = { id: string; name: string };
 type Event = { id: string; kind: string; message: string; level: string; created_at: string };
 type Briefing = { id: string; briefing_date: string; body: string; metrics: any; read_at: string | null };
 type SyncTick = { id: string; message: string; level: string; created_at: string };
+type BriefingAction = {
+  id: string;
+  action_type: string;
+  status: string;
+  result: any;
+  payload: any;
+  finished_at: string | null;
+  started_at: string | null;
+  created_at: string;
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  send_followups: "Send queued follow-ups",
+  draft_pitch_for_warm_leads: "Draft pitches for warm leads",
+  launch_campaign_from_intel: "Launch campaign from intel",
+  apply_to_top_jobs: "Apply to top jobs",
+};
+const STATUS_STYLES: Record<string, string> = {
+  pending: "bg-muted text-muted-foreground",
+  running: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  done: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  skipped: "bg-amber-500/15 text-amber-700 dark:text-amber-500",
+  failed: "bg-destructive/15 text-destructive",
+};
 
 const stateColors: Record<string, string> = {
   queued: "bg-muted text-muted-foreground",
