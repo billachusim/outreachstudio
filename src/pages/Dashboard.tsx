@@ -234,6 +234,47 @@ const Dashboard = () => {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" /> Today's actions
+            <Badge variant="outline" className="text-[10px]">runs daily 6pm WAT</Badge>
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">Agent reads the briefing's next-actions and auto-runs them. Currently active: send queued follow-ups.</p>
+        </CardHeader>
+        <CardContent>
+          {briefingActions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No actions queued yet for today.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {briefingActions.map((a) => {
+                const ts = a.finished_at ?? a.started_at ?? a.created_at;
+                const resultLine = a.status === "done" && a.result
+                  ? `sent ${a.result.sent ?? 0} · skipped ${a.result.skipped ?? 0} · failed ${a.result.failed ?? 0}`
+                  : a.status === "failed"
+                    ? (a.result?.error ?? a.result?.body?.error ?? `http ${a.result?.http ?? "?"}`)
+                    : a.status === "skipped"
+                      ? (a.result?.reason ?? "skipped")
+                      : a.payload?.reason ?? "";
+                return (
+                  <li key={a.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border p-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{ACTION_LABELS[a.action_type] ?? a.action_type}</span>
+                        <Badge className={STATUS_STYLES[a.status] ?? ""}>{a.status}</Badge>
+                      </div>
+                      {resultLine && <div className="mt-1 text-xs text-muted-foreground break-words">{String(resultLine)}</div>}
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{new Date(ts).toLocaleTimeString()}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+
       <TopTriggersWidget />
 
       <Card>
