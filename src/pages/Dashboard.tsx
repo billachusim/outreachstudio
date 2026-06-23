@@ -100,7 +100,7 @@ const Dashboard = () => {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes, syncRes] = await Promise.all([
+    const [runsRes, campsRes, eventsRes, sentRes, briefingRes, eventsFunnelRes, syncRes, actionsRes] = await Promise.all([
       supabase.from("campaign_runs").select("*").order("updated_at", { ascending: false }).limit(20),
       supabase.from("campaigns").select("id,name"),
       supabase.from("run_events").select("*").order("created_at", { ascending: false }).limit(20),
@@ -108,6 +108,7 @@ const Dashboard = () => {
       supabase.from("daily_briefings").select("*").order("briefing_date", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("pitch_events").select("event_type").gte("occurred_at", since),
       supabase.from("run_events").select("id,message,level,created_at").eq("kind", "gmail-reply-sync").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("briefing_actions").select("id,action_type,status,result,payload,finished_at,started_at,created_at").eq("briefing_date", new Date().toISOString().slice(0, 10)).order("created_at", { ascending: true }),
     ]);
 
     setRuns((runsRes.data as Run[]) ?? []);
