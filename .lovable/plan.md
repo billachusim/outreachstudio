@@ -1,57 +1,61 @@
-# Credit-burn audit & reduction plan
+# Briefing action agent
 
-## What's running today
+## What exists today
+The dashboard's daily briefing ends with a "Next actions" paragraph written by `daily-briefing`. Nothing reads it or executes it — it's display-only text.
 
-13 active cron jobs (all hitting AI gateway + Firecrawl in various ways):
+## What to build
+A new daily agent that, at **18:00 WAT**, reads today's briefing, extracts concrete next actions, queues them, and **auto-runs** them. Initial scope: **send queued follow-ups**. The queue + executor are built generically so we can flip on more action types later without rewiring.
 
-| Job | Schedule | AI calls per run | Firecrawl per run | Notes |
-|---|---|---|---|---|
-| campaign-tick | every 2 min | 1 per due lead × users | none | Heaviest tick — runs 720×/day even when nothing is due |
-| follow-up-tick | every 10 min | up to 5 (1 per due seq) | none | 144×/day |
-| gmail-reply-sync | every 10 min | 1 per new reply (classify-reply) | none | 144×/day; AI only on new mail |
-| scan-jobs | every 3 hours | ~1 per source (flash-lite) | 1 scrape per source | **8×/day** — biggest scheduled spend |
-| scan-intel | daily 6am | ~1 per 20 articles (flash-lite) | 3 defaults + user sources | OK |
-| auto-launch-top-triggers | daily 6am | varies (drafts pitches) | none | Can fan out many drafts |
-| draft-social-from-intel | daily 5:30am | 1 per top intel item (flash) | none | OK |
-| **daily-briefing-8am-wat** | daily 7am | 1 (flash-lite) | none | **Duplicate of next row** |
-| **daily-briefing-morning** | daily 7am | 1 (flash-lite) | none | **Same function, same time — runs twice** |
-| daily-journal-nightly | daily 9:30pm | 1 | none | OK |
-| cleanup-intel | daily 4am | 0 | none | Free |
-| score-leads-nightly | daily 2am | 0 (DB only) | none | Free |
-| weekly-intel-digest | weekly Sun 5pm | small | none | OK |
+## Pieces
 
-Models in use: mostly `gemini-2.5-flash` and `gemini-2.5-flash-lite` (cheap). Only `tailor-cv` and `apply-assistant` use `gemini-2.5-pro` — those are user-triggered, not cron.
+### 1. New table `briefing_actions`
+Stores extracted actions and their run state.
 
-## Where the burn actually comes from
+Columns: `id`, `user_id`, `briefing_id` (fk → daily_briefings), `briefing_date`, `action_type` (text, e.g. `send_followups`), `payload` (jsonb), `status` (`pending`|`running`|`done`|`skipped`|`failed`), `result` (jsonb, function response or error), `scheduled_for` (timestamptz), `started_at`, `finished_at`, `created_at`.
 
-1. **Duplicate daily-briefing cron** — same function fires twice every morning. Pure waste.
-2. **scan-jobs every 3 hours** — job boards don't change that fast; 8 Firecrawl scrapes per source per day is the largest scheduled Firecrawl cost.
-3. **campaign-tick every 2 minutes** — fine when you're actively running campaigns, wasteful when idle (still queries DB 720×/day; emits 0 AI calls when nothing's due, so cost is low but it's the noisiest job).
-4. **No "is this user active?" gate** on daily jobs — they run for every user with offerings even if you haven't opened the app in weeks.
-5. **scan-intel + auto-launch-top-triggers + draft-social-from-intel** all fire on the same morning window and can fan out many AI drafts per user per day.
+RLS: owner can SELECT/UPDATE/DELETE their own rows; service_role full access. Standard GRANT block for `authenticated` + `service_role`.
 
-## Proposed changes (cron only — no app behavior change unless noted)
+Index on `(user_id, briefing_date)` and `(status, scheduled_for)`.
 
-1. **Remove the duplicate** `daily-briefing-8am-wat` (keep `daily-briefing-morning`). −50% briefing cost immediately.
-2. **scan-jobs: every 3h → every 12h** (e.g. `0 6,18 * * *`). Cuts Firecrawl scrape volume by 4×. Manual "Scan now" button stays available in the Jobs page.
-3. **campaign-tick: every 2 min → every 5 min**. Worst case: 3 extra minutes of delay before an email goes out. Cuts cron invocations by 60%.
-4. **follow-up-tick: every 10 min → every 30 min**. Follow-ups are not time-critical to the minute.
-5. **Add an "active user" gate** to `scan-intel`, `auto-launch-top-triggers`, `draft-social-from-intel`, `daily-briefing`, `daily-journal`, `weekly-intel-digest`: skip any user with no app activity (no `run_events`, no `pitches`, no logged-in session) in the last 14 days. One-line query at the top of each loop.
-6. **Cap fan-out on auto-launch-top-triggers**: hard limit to top N=3 triggers per user per day (currently unbounded), so a noisy intel day can't draft 20 pitches in one go.
+### 2. New edge function `execute-briefing-actions`
+One function does both extract + execute (single cron, simplest). Steps per run:
 
-Optional (ask before doing):
-- Disable `auto-launch-top-triggers` entirely and require manual launch from the Intel page. Biggest single saver if you don't want auto-drafting at all.
-- Switch `draft-social-from-intel` and `draft-pitch-from-intel` from `flash` → `flash-lite` (good enough for short drafts; ~5× cheaper per call).
+1. Active-user gate (reuse `_shared/active-user.ts`, 14-day window).
+2. For each active user, load today's `daily_briefings` row. Skip if none.
+3. Skip if a `briefing_actions` row already exists for that `(user_id, briefing_date)` — idempotent.
+4. Send `body` + `metrics` to `gemini-2.5-flash-lite` with a strict JSON schema asking it to classify each next-action sentence into one of the supported `action_type` values. Unknown/ambiguous items → dropped.
+5. Insert rows into `briefing_actions` with `status='pending'` and `scheduled_for = now()`.
+6. Immediately run the executor pass:
+   - Select `status='pending' AND scheduled_for <= now()` for this user.
+   - For each row, mark `running`, call the matching handler, then write `done`/`failed` + `result`.
 
-## Files touched
+Supported handlers (v1):
+- `send_followups` → POST to existing `follow-up-tick` function (service-role auth). Records returned counts in `result`.
 
-- New migration: `cron.unschedule('daily-briefing-8am-wat')` + reschedule `scan-jobs-every-3h`, `campaign-tick-every-2min`, `follow-up-tick-every-10min` with new names + cadences.
-- `supabase/functions/scan-intel/index.ts`, `auto-launch-top-triggers/index.ts`, `draft-social-from-intel/index.ts`, `daily-briefing/index.ts`, `daily-journal/index.ts`, `weekly-intel-digest/index.ts` — add active-user gate helper.
-- `supabase/functions/auto-launch-top-triggers/index.ts` — add `LIMIT 3` cap.
+Future-ready stubs (registered but no-op + status `skipped` with reason):
+- `draft_pitch_for_warm_leads`
+- `launch_campaign_from_intel`
+- `apply_to_top_jobs`
 
-## Out of scope
+This keeps the table + extractor schema stable when we turn them on.
 
-- Per-user budget UI (you already have `email_budgets`; AI-credit budget is a bigger feature).
-- Changing on-demand functions (`tailor-cv`, `apply-assistant`, `draft-application`) — those only run when you click a button.
+### 3. Cron
+New migration: schedule `execute-briefing-actions` daily at **17:00 UTC** (18:00 WAT) via `pg_cron` + `pg_net` POST, same pattern as the other crons.
 
-Want me to also flip the two optional items (kill `auto-launch-top-triggers`, downgrade draft models to flash-lite)?
+### 4. Dashboard surface (small)
+Below the daily briefing card, render a "Today's actions" list reading from `briefing_actions` for today: action type, status badge, short result line, timestamp. Read-only — execution is automatic. No new buttons.
+
+## Files
+
+New:
+- `supabase/migrations/<ts>_briefing_actions.sql` — table, GRANTs, RLS, indexes, cron schedule
+- `supabase/functions/execute-briefing-actions/index.ts`
+
+Edited:
+- `src/pages/Dashboard.tsx` — add the Today's actions list under the briefing
+- `src/integrations/supabase/types.ts` — regenerated for the new table
+
+## Out of scope (call out for later)
+- The other 3 action types stay registered-but-skipped until you say go (they each spend credits or send messages, and you only greenlit follow-ups).
+- No per-action approval UI — current mode is fully automatic per your choice.
+- No retry/backoff on failed actions beyond logging; next day's run is the retry.
