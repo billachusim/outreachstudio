@@ -1,53 +1,43 @@
-## Problem
+## 1. LinkedIn intel-driven drafts are missing
 
-Two rules are choking sends today:
+`draft-social-from-intel` runs as a daily cron, but in cron mode it only drafts **X** posts (line 118 of `supabase/functions/draft-social-from-intel/index.ts` calls `draftOne(..., "x", ...)` and nothing else). LinkedIn drafts only happen if you manually open the Intel drawer and pick LinkedIn.
 
-1. **Job-hunt reservation.** Daily budget is split 60 outreach / 25 job-hunt / 15 flex. We never actually email for jobs (you apply manually), so 25–40 emails/day are sitting unused.
-2. **Top-3 priority gate.** When more than 3 outreach campaigns are active, anything outside today's top 3 (by intel score) gets paused with "Lower priority than today's top 3 campaigns. Resumes tomorrow." With many intel-spawned campaigns, most get frozen.
+**Fix:** in the cron branch, draft **both** `x` and `linkedin` for each of the top 2 items per user. The dedupe check already keys per `intel_item_id + platform` (table has a unique index on those), so this won't double-insert.
 
-Together that's why no email went out today.
+## 2. Tune character / length guides
 
-## What changes
+Update `platformGuide()` in `draft-social-from-intel/index.ts`:
 
-### 1. All 100 emails/day go to outreach
+- **X**: "up to 280 chars (you have X Premium), 1–2 short paragraphs, punchy hook, optional URL at the end, max 2 hashtags."
+- **LinkedIn**: "3–4 short paragraphs, ~120–220 words total, strong first-line hook, a perspective/insight, end with a soft question. No hashtag spam, no emoji clutter."
 
-- `email_budgets`: `outreach_cap = 100`, `jobhunt_cap = 0` for every user, every day.
-- `_shared/email-budget.ts`:
-  - Remove the bucket split. `checkBudget` only enforces the global 100/day ceiling against `outreach_sent`.
-  - If a `job_hunt` campaign somehow tries to send, return `ok: false` with reason "job-hunt sending is disabled" (defense-in-depth — no job campaigns should be auto-sending).
-- `allocate-email-budget`:
-  - Drop the intel-vs-jobpost signal comparison and the flex math entirely.
-  - Each morning just upsert `outreach_cap=100, jobhunt_cap=0` (unless the row has `notes='override'`).
-- `daily-briefing` still calls `allocate-email-budget` once a morning — no change there.
+Leave Instagram and Telegram guides as they are.
 
-### 2. Share the 100 across intel-spawned campaigns by ranking
+The 280-char hard cap in `post-x` (`if (b.text.length > 280)`) already matches Premium — no change needed there.
 
-Replace the "top 3 campaigns/day" gate in `campaign-tick` with a per-campaign daily share derived from intel relevance.
+## 3. Twitter auto-posting is not a code bug
 
-For each tick on an outreach campaign:
+`post-x` is wired correctly and the Social-page button does call it. The reason taps appear to do nothing is that **every** recent X attempt returns `403 client-not-enrolled` from `api.x.com/2/tweets`. The error toast does fire ("Your X app is still a standalone app…"), but the underlying issue is on the X Developer Portal side:
 
-1. Load all `active` outreach campaigns for the user.
-2. For each, look up the max `intel_items.relevance_score` where `spawned_campaign_id = campaign.id`. Manual campaigns (no intel link) get a baseline score of 50.
-3. Compute weights: `weight = max(score, 10)` so nothing is zero.
-4. `share = max(5, floor(100 * weight / sum_of_weights))` — every active campaign gets at least 5/day so nothing starves; high-ranked intel campaigns get a bigger slice.
-5. Cap `share` at the remaining global budget (`100 - outreach_sent_today`) and at the existing per-campaign `effectiveCap` (channel cap).
-6. If this campaign has already sent `>= share` today, pause it with "Daily share reached (X/share). Resumes tomorrow." Otherwise proceed to draft/send.
+> "When authenticating requests to the Twitter API v2 endpoints, you must use keys and tokens from a Twitter developer App that is attached to a Project."
 
-This removes the binary "top-3 only" cliff. Twenty active intel campaigns with similar scores would each get ~5; one dominant high-score campaign would get the lion's share.
+This is fixed in the X Developer Portal, not in our code. Steps (I'll surface these in the toast / Channels page hint, no logic change):
 
-### 3. UI copy
+1. developer.twitter.com → Projects & Apps → create a Project (or open the existing one).
+2. Attach your existing App to that Project.
+3. App → User authentication settings → set permissions to **Read and Write**.
+4. **Regenerate** the Access Token + Access Token Secret (the old ones are read-only).
+5. In Outreach Studio → Channels, disconnect X and reconnect with the new tokens.
 
-`src/pages/Dashboard.tsx` and any budget chip that shows "Outreach 60 · Jobs 25 · Flex 15" → "Outreach 100 · Jobs 0 (manual)". Only relabel; no behavioral changes here.
+After that, the same button will post successfully — the code path is identical to LinkedIn's.
 
-## Files touched
+## Files to touch
 
-- `supabase/functions/_shared/email-budget.ts` — collapse to single 100-cap check.
-- `supabase/functions/allocate-email-budget/index.ts` — hard-set 100/0.
-- `supabase/functions/campaign-tick/index.ts` — replace top-N gate (lines ~573–636) with the per-campaign share calc above.
-- `src/pages/Dashboard.tsx` — label-only update if budget chip is shown.
-- Migration to backfill today's `email_budgets` rows to `outreach_cap=100, jobhunt_cap=0` so the change takes effect immediately (not just tomorrow).
+- `supabase/functions/draft-social-from-intel/index.ts` — update `platformGuide()` strings; in the cron loop draft both `x` and `linkedin` per top item.
+
+No other backend or UI changes are needed for the posting flow itself.
 
 ## Out of scope
 
-- Job board UI and `scan-jobs` keep working as-is — you still see job opportunities.
-- No changes to follow-ups, intel ingestion, or the briefing agent.
+- No changes to `post-x`, `post-linkedin`, or `Social.tsx` posting logic.
+- Not regenerating existing X drafts that were written to 270 chars — only new drafts (from now on) will use the 280-char guidance.
