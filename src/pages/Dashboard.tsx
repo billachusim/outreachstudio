@@ -140,6 +140,7 @@ const Dashboard = () => {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "run_events" }, load)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "pitch_events" }, load)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "daily_briefings" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "briefing_actions" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
