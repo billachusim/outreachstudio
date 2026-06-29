@@ -180,23 +180,40 @@ Rules:
       }
     }
 
-    // 3. Filter dupes / blocked, then validate with Firecrawl /v2/map (parallel, capped)
+    // 3. Filter dupes / blocked, then validate editorial URLs with Firecrawl /v2/map.
+    //    Ad/maps keyword suggestions don't have URLs to validate — pass them through after dedupe.
     const HARD_BLOCK = ["facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com", "youtube.com", "tiktok.com", "google.com", "bing.com", "wikipedia.org", "amazon.com", "ebay.com"];
+    const AD_TYPES = new Set(["ad_signal_meta", "ad_signal_google", "google_maps"]);
 
-    const candidates: Suggestion[] = [];
-    const seen = new Set<string>();
+    const editorial: Suggestion[] = [];
+    const adKeyword: Suggestion[] = [];
+    const seenHosts = new Set<string>();
+    const seenAdKw = new Set<string>(existingAdKeywords);
+
     for (const s of raw) {
-      if (!s?.url || !s?.name) continue;
+      if (!s?.name || !s?.type) continue;
+      const name = s.name.trim();
+      if (!name) continue;
+
+      if (AD_TYPES.has(s.type)) {
+        const key = `${s.type}::${name.toLowerCase()}`;
+        if (seenAdKw.has(key)) continue;
+        seenAdKw.add(key);
+        adKeyword.push({ ...s, name, url: "" });
+        continue;
+      }
+
+      // editorial — needs a URL
+      if (!s.url) continue;
       let url = s.url.trim();
       if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
       const host = rootDomain(url);
       if (!host) continue;
       if (existingHosts.has(host)) continue;
       if (HARD_BLOCK.some((b) => host === b || host.endsWith(`.${b}`))) continue;
-      if (seen.has(host)) continue;
-      seen.add(host);
-      candidates.push({ ...s, url, name: s.name.trim() });
-      if (candidates.length >= 8) break;
+      if (seenHosts.has(host)) continue;
+      seenHosts.add(host);
+      editorial.push({ ...s, url, name });
     }
 
     const validateOne = async (c: Suggestion): Promise<Suggestion | null> => {
@@ -216,9 +233,10 @@ Rules:
       }
     };
 
-    const validated = (await Promise.all(candidates.map(validateOne))).filter(Boolean) as Suggestion[];
+    const validatedEditorial = (await Promise.all(editorial.slice(0, 8).map(validateOne))).filter(Boolean) as Suggestion[];
+    const suggestions = [...validatedEditorial, ...adKeyword.slice(0, 6)];
 
-    return json(200, { suggestions: validated });
+    return json(200, { suggestions });
   } catch (e) {
     console.error("discover-intel-sources error", e);
     return json(500, { error: e instanceof Error ? e.message : "Unknown error" });
