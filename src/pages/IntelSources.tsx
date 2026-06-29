@@ -65,15 +65,17 @@ const IntelSources = () => {
 
   const add = async () => {
     if (!user) return;
-    if (!name.trim() || !url.trim()) return toast.error("Name and URL required");
+    const isAd = kind === "ad_signal_meta" || kind === "ad_signal_google" || kind === "google_maps";
+    if (!name.trim()) return toast.error(isAd ? "Keyword required" : "Name required");
+    if (!isAd && !url.trim()) return toast.error("URL required");
     let safeUrl = url.trim();
-    if (!/^https?:\/\//i.test(safeUrl)) safeUrl = `https://${safeUrl}`;
+    if (safeUrl && !/^https?:\/\//i.test(safeUrl)) safeUrl = `https://${safeUrl}`;
     const { error } = await supabase.from("intel_sources").insert({
-      user_id: user.id, name: name.trim(), url: safeUrl, enabled: true, kind,
+      user_id: user.id, name: name.trim(), url: safeUrl || name.trim(), enabled: true, kind,
     } as never);
     if (error) return toast.error(error.message);
     setName(""); setUrl("");
-    toast.success("Source added");
+    toast.success(isAd ? "Ad source added — run a scan to pull advertisers." : "Source added");
     load();
   };
 
