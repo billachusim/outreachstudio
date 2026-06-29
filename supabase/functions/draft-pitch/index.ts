@@ -103,12 +103,26 @@ Demo URL: ${offering.demo_url ?? ""}
 Testimonial: ${offering.testimonial ?? ""}`
       : "OFFERING: (none linked to this lead's campaign — write a generic but warm intro)";
 
+    const ad = (lead as any).ad_context as
+      | { platform?: string; ad_copy?: string | null; landing_page?: string | null; cta?: string | null; started_at?: string | null }
+      | null
+      | undefined;
+    const adBlock = ad?.platform
+      ? `
+ACTIVE-ADVERTISER SIGNAL
+This prospect is actively running ads on ${ad.platform}${ad.started_at ? ` since ${ad.started_at}` : ""}.
+${ad.ad_copy ? `Recent ad copy: "${String(ad.ad_copy).slice(0, 400)}"` : ""}
+${ad.landing_page ? `Landing page: ${ad.landing_page}` : ""}
+${ad.cta ? `CTA: ${ad.cta}` : ""}
+Open with a natural, one-line reference to what they're advertising — never say "I saw your ad" verbatim, weave it in.`
+      : "";
+
     const leadBlock = `LEAD
 Business: ${lead.business_name}
 Contact name: ${lead.contact_name ?? "(unknown)"}
 Website: ${lead.website ?? ""}
 Address: ${lead.address ?? ""}
-Notes (research): ${lead.notes ?? ""}`;
+Notes (research): ${lead.notes ?? ""}${adBlock}`;
 
     const templateBlock = template
       ? `TEMPLATE STYLE REFERENCE (use as tone/structure guide, not verbatim)

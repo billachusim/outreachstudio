@@ -20,6 +20,7 @@ const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 interface Body {
   campaignId: string;
   limit?: number;
+  source?: "web" | "meta_ads" | "google_ads" | "google_maps";
 }
 
 const json = (status: number, payload: unknown) =>
@@ -79,7 +80,7 @@ Deno.serve(async (req) => {
     const { data: { user }, error: uerr } = await supabase.auth.getUser();
     if (uerr || !user) return json(401, { error: "Unauthorized" });
 
-    const { campaignId, limit = 10 } = (await req.json()) as Body;
+    const { campaignId, limit = 10, source = "web" } = (await req.json()) as Body;
     if (!campaignId) return json(400, { error: "campaignId required" });
 
     const { data: campaign, error: cerr } = await supabase
@@ -89,6 +90,33 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (cerr) return json(500, { error: cerr.message });
     if (!campaign) return json(404, { error: "Campaign not found" });
+
+    // Apify-backed ad-signal discovery
+    if (source !== "web") {
+      const region = await fetchUserRegion(supabase, user.id);
+      const keyword = [campaign.category, campaign.keywords].filter(Boolean).join(" ").trim() || campaign.name;
+      const platform = source === "meta_ads" ? "meta" : source === "google_ads" ? "google_ads" : "google_maps";
+      const supaUrl = Deno.env.get("SUPABASE_URL")!;
+      const adRes = await fetch(`${supaUrl}/functions/v1/scan-ads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authHeader },
+        body: JSON.stringify({ keyword, country: region.country ?? region.region, platforms: [platform], limit }),
+      });
+      const adJson = await adRes.json().catch(() => ({}));
+      if (!adRes.ok) return json(adRes.status, { error: adJson?.error ?? "scan-ads failed" });
+
+      // scan-ads inserts leads at user-scope (no campaign); attach the new ones to this campaign.
+      const insertedCount = adJson?.result?.inserted ?? 0;
+      if (insertedCount > 0) {
+        await supabase
+          .from("leads")
+          .update({ campaign_id: campaignId })
+          .eq("user_id", user.id)
+          .is("campaign_id", null)
+          .not("ad_context", "is", null);
+      }
+      return json(200, { source, inserted: insertedCount, errors: adJson?.result?.errors ?? [] });
+    }
 
     // Build search query from campaign metadata, biased to user's region.
     const region = await fetchUserRegion(supabase, user.id);

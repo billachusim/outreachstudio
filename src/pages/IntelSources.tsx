@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, ArrowLeft, Globe, Sparkles, Loader2, RefreshCw, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
-type Kind = "news" | "job_board" | "talent_marketplace";
+type Kind = "news" | "job_board" | "talent_marketplace" | "ad_signal_meta" | "ad_signal_google" | "google_maps";
 type Source = { id: string; name: string; url: string; enabled: boolean; created_at: string; auto_promoted: boolean; kind: Kind };
 type Suggestion = { name: string; url: string; why_relevant: string; type: "news" | "blog" | "directory" | "listicle" };
 
@@ -40,25 +40,42 @@ const IntelSources = () => {
   const load = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("intel_sources").select("*").eq("kind", "news").order("created_at");
+      .from("intel_sources").select("*")
+      .in("kind", ["news", "ad_signal_meta", "ad_signal_google", "google_maps"])
+      .order("created_at");
     if (error) toast.error(error.message);
     setSources((data as Source[]) ?? []);
     setLoading(false);
+  };
+
+  const scanAdsNow = async () => {
+    setScanning(true);
+    try {
+      const { error } = await supabase.functions.invoke("scan-ads", { body: {} });
+      if (error) throw error;
+      toast.success("Ad scan started — new advertiser leads will land in your Leads list shortly.");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Scan failed");
+    } finally {
+      setScanning(false);
+    }
   };
 
   useEffect(() => { load(); }, [user?.id]);
 
   const add = async () => {
     if (!user) return;
-    if (!name.trim() || !url.trim()) return toast.error("Name and URL required");
+    const isAd = kind === "ad_signal_meta" || kind === "ad_signal_google" || kind === "google_maps";
+    if (!name.trim()) return toast.error(isAd ? "Keyword required" : "Name required");
+    if (!isAd && !url.trim()) return toast.error("URL required");
     let safeUrl = url.trim();
-    if (!/^https?:\/\//i.test(safeUrl)) safeUrl = `https://${safeUrl}`;
+    if (safeUrl && !/^https?:\/\//i.test(safeUrl)) safeUrl = `https://${safeUrl}`;
     const { error } = await supabase.from("intel_sources").insert({
-      user_id: user.id, name: name.trim(), url: safeUrl, enabled: true, kind,
+      user_id: user.id, name: name.trim(), url: safeUrl || name.trim(), enabled: true, kind,
     } as never);
     if (error) return toast.error(error.message);
     setName(""); setUrl("");
-    toast.success("Source added");
+    toast.success(isAd ? "Ad source added — run a scan to pull advertisers." : "Source added");
     load();
   };
 
@@ -160,23 +177,26 @@ const IntelSources = () => {
       <Card>
         <CardHeader><CardTitle className="text-base">Add a custom source</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_140px_auto]">
+          <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_180px_auto]">
             <div className="space-y-1.5">
-              <Label className="text-xs uppercase text-muted-foreground">Name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Remote OK" />
+              <Label className="text-xs uppercase text-muted-foreground">Name / keyword</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={kind.startsWith("ad_signal") || kind === "google_maps" ? "e.g. dental clinic" : "Remote OK"} />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs uppercase text-muted-foreground">URL</Label>
-              <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://remoteok.com/" />
+              <Label className="text-xs uppercase text-muted-foreground">URL {(kind.startsWith("ad_signal") || kind === "google_maps") && <span className="text-[10px] normal-case">(optional for ad sources)</span>}</Label>
+              <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={kind.startsWith("ad_signal") || kind === "google_maps" ? "https://(optional)" : "https://remoteok.com/"} />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs uppercase text-muted-foreground">Kind</Label>
               <select
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value="news"
-                disabled
+                value={kind}
+                onChange={(e) => setKind(e.target.value as Kind)}
               >
-                <option value="news">News</option>
+                <option value="news">News / blog</option>
+                <option value="ad_signal_meta">Meta Ads advertisers</option>
+                <option value="ad_signal_google">Google Ads advertisers</option>
+                <option value="google_maps">Google Maps businesses</option>
               </select>
             </div>
             <div className="flex items-end">
@@ -184,9 +204,10 @@ const IntelSources = () => {
             </div>
           </div>
           <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-            <span>Looking for job boards or talent marketplaces? They live in the Jobs page.</span>
-            <Button size="sm" variant="outline" asChild>
-              <Link to="/jobs?tab=sources"><Sparkles className="h-4 w-4" /> Manage in Jobs</Link>
+            <span>Ad sources surface businesses actively running ads — high buyer intent. Scan runs automatically; you can trigger one now.</span>
+            <Button size="sm" variant="outline" onClick={scanAdsNow} disabled={scanning} className="gap-1.5 shrink-0">
+              {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Scan ads now
             </Button>
           </div>
         </CardContent>
