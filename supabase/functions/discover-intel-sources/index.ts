@@ -82,9 +82,13 @@ Deno.serve(async (req) => {
     const campaigns = campRes.data ?? [];
 
     const existingHosts = new Set<string>(DEFAULT_SOURCE_HOSTS);
-    for (const s of (srcRes.data ?? [])) {
-      const h = rootDomain((s as any).url);
+    const existingAdKeywords = new Set<string>(); // `${kind}::${lower(name)}`
+    for (const s of (srcRes.data ?? []) as any[]) {
+      const h = rootDomain(s.url);
       if (h) existingHosts.add(h);
+      if (s.kind && ["ad_signal_meta", "ad_signal_google", "google_maps"].includes(s.kind)) {
+        existingAdKeywords.add(`${s.kind}::${(s.name || "").toLowerCase().trim()}`);
+      }
     }
 
     // 2. AI suggestion call (structured tool output)
