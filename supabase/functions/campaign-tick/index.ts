@@ -576,7 +576,7 @@ Notes: ${lead.notes ?? ""}`;
       const GLOBAL_CAP = 100;
       const MIN_SHARE = 5;
 
-      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      // (startOfDay already declared above)
       const { data: todaysPitches2 } = await supabase
         .from("pitches")
         .select("lead_id, leads!inner(campaign_id, campaigns!inner(mode))")
