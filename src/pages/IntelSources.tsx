@@ -126,20 +126,27 @@ const IntelSources = () => {
 
   const addSuggestion = async (s: Suggestion) => {
     if (!user) return;
-    const host = (() => { try { return new URL(s.url).hostname; } catch { return s.url; } })();
-    setAddingHosts((p) => new Set(p).add(host));
+    const AD_TYPES = ["ad_signal_meta", "ad_signal_google", "google_maps"] as const;
+    const isAd = (AD_TYPES as readonly string[]).includes(s.type);
+    const kind: Kind = isAd ? (s.type as Kind) : "news";
+    const dedupeKey = isAd ? `${s.type}::${s.name.toLowerCase()}` : s.url;
+    setAddingHosts((p) => new Set(p).add(dedupeKey));
     try {
       const { error } = await supabase.from("intel_sources").insert({
-        user_id: user.id, name: s.name, url: s.url, enabled: true,
-      });
+        user_id: user.id,
+        name: s.name,
+        url: isAd ? (s.url || s.name) : s.url,
+        enabled: true,
+        kind,
+      } as never);
       if (error) throw error;
       toast.success(`Added ${s.name}`);
-      setSuggestions((prev) => (prev ?? []).filter((x) => x.url !== s.url));
+      setSuggestions((prev) => (prev ?? []).filter((x) => (isAd ? !(x.type === s.type && x.name === s.name) : x.url !== s.url)));
       load();
     } catch (e: any) {
       toast.error(e?.message ?? "Failed to add");
     } finally {
-      setAddingHosts((p) => { const n = new Set(p); n.delete(host); return n; });
+      setAddingHosts((p) => { const n = new Set(p); n.delete(dedupeKey); return n; });
     }
   };
 
