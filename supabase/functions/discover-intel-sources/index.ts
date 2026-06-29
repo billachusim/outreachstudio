@@ -126,7 +126,7 @@ Rules:
         model: "google/gemini-2.5-flash",
         messages: [
           { role: "system", content: sysPrompt },
-          { role: "user", content: "Suggest 6-8 candidate intel sources now." },
+          { role: "user", content: "Suggest 8-12 candidate intel sources now, mixing editorial and ad/maps keyword sources." },
         ],
         tools: [{
           type: "function",
