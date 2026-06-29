@@ -25,12 +25,24 @@ function rootDomain(urlStr: string): string | null {
   try { return new URL(urlStr).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
 }
 
+type SuggestionType = "news" | "blog" | "directory" | "listicle" | "ad_signal_meta" | "ad_signal_google" | "google_maps";
 type Suggestion = {
   name: string;
   url: string;
   why_relevant: string;
-  type: "news" | "blog" | "directory" | "listicle";
+  type: SuggestionType;
 };
+
+const TYPE_TO_KIND: Record<SuggestionType, string> = {
+  news: "news",
+  blog: "news",
+  directory: "news",
+  listicle: "news",
+  ad_signal_meta: "ad_signal_meta",
+  ad_signal_google: "ad_signal_google",
+  google_maps: "google_maps",
+};
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -59,8 +71,9 @@ Deno.serve(async (req) => {
       supabase.from("offerings").select("title,tagline,target_audience,trigger_keywords").eq("user_id", user.id).limit(20),
       supabase.from("agent_memories").select("title,content").eq("user_id", user.id).limit(15),
       supabase.from("campaigns").select("name,category,city,keywords").eq("user_id", user.id).eq("status", "active").limit(20),
-      supabase.from("intel_sources").select("url").eq("user_id", user.id),
+      supabase.from("intel_sources").select("url,name,kind").eq("user_id", user.id),
     ]);
+
 
     const region = profileRes.data?.outreach_region ?? "Global";
     const countryCode = profileRes.data?.outreach_country_code ?? "";
@@ -69,18 +82,29 @@ Deno.serve(async (req) => {
     const campaigns = campRes.data ?? [];
 
     const existingHosts = new Set<string>(DEFAULT_SOURCE_HOSTS);
-    for (const s of (srcRes.data ?? [])) {
-      const h = rootDomain((s as any).url);
+    const existingAdKeywords = new Set<string>(); // `${kind}::${lower(name)}`
+    for (const s of (srcRes.data ?? []) as any[]) {
+      const h = rootDomain(s.url);
       if (h) existingHosts.add(h);
+      if (s.kind && ["ad_signal_meta", "ad_signal_google", "google_maps"].includes(s.kind)) {
+        existingAdKeywords.add(`${s.kind}::${(s.name || "").toLowerCase().trim()}`);
+      }
     }
 
     // 2. AI suggestion call (structured tool output)
-    const sysPrompt = `You are an outreach intel researcher. Suggest 6-8 high-signal news sites, blogs, listicle publishers, or business directories that would be rich sources of trigger events (funding, launches, expansion) and lists of businesses for the user described below.
+    const sysPrompt = `You are an outreach intel researcher. Suggest 8-12 high-signal intel sources for this user across TWO categories:
+
+A) Editorial sources (news sites, blogs, listicle publishers, business directories) that publish trigger events (funding, launches, expansion) and lists of businesses. type = "news" | "blog" | "directory" | "listicle". Provide a real https URL.
+
+B) Ad-signal / map keyword sources that surface businesses actively spending on ads or running local services. These do NOT have URLs — instead the "name" field is a SEARCH KEYWORD (e.g. "dental clinic Lagos", "personal injury lawyer Houston", "SaaS HR Africa"). Provide an empty string for url. Choose at least 2-4 of these total across the three types:
+  - type = "ad_signal_meta"   → Meta Ads Library keyword for the user's target audience
+  - type = "ad_signal_google" → Google Ads Transparency keyword for the user's target audience
+  - type = "google_maps"      → Google Maps business category + city for local prospecting
 
 User region: ${region}${countryCode ? ` (${countryCode.toUpperCase()})` : ""}
 
 Offerings (what they sell):
-${offerings.map((o: any) => `- ${o.title}${o.tagline ? ` — ${o.tagline}` : ""}${o.target_audience ? ` (audience: ${o.target_audience})` : ""}`).join("\n") || "(none)"}
+${offerings.map((o: any) => `- ${o.title}${o.tagline ? ` — ${o.tagline}` : ""}${o.target_audience ? ` (audience: ${o.target_audience})` : ""}${o.trigger_keywords ? ` (triggers: ${o.trigger_keywords})` : ""}`).join("\n") || "(none)"}
 
 Active campaigns:
 ${campaigns.map((c: any) => `- ${c.name}${c.category ? ` [${c.category}]` : ""}${c.city ? ` in ${c.city}` : ""}${c.keywords ? ` — ${c.keywords}` : ""}`).join("\n") || "(none)"}
@@ -88,14 +112,12 @@ ${campaigns.map((c: any) => `- ${c.name}${c.category ? ` [${c.category}]` : ""}$
 Memory:
 ${memories.map((m: any) => `- ${m.title}: ${(m.content || "").slice(0, 200)}`).join("\n") || "(none)"}
 
-Already-known sources to skip:
-${[...existingHosts].join(", ")}
+Already-known editorial domains to skip: ${[...existingHosts].join(", ") || "(none)"}
+Already-known ad/maps keywords to skip: ${[...existingAdKeywords].map((k) => k.split("::")[1]).join(", ") || "(none)"}
 
 Rules:
-- Prefer publishers in the user's region or that frequently cover it.
-- Prefer sites that publish "Top X" / "Best Y in Z" listicles or fundraise news.
-- Avoid social networks, search engines, marketplaces, government, education sites.
-- Return a real, working https URL for each (homepage or category page).`;
+- For editorial sources: prefer publishers in the user's region; avoid social networks, search engines, marketplaces, government, education sites; return a real working https URL.
+- For ad/maps keyword sources: tailor keywords to the user's target audience and region (include city/country when local intent matters). Keep keywords short (2-6 words).`;
 
     const aiRes = await fetch(LOVABLE_AI, {
       method: "POST",
@@ -104,7 +126,7 @@ Rules:
         model: "google/gemini-2.5-flash",
         messages: [
           { role: "system", content: sysPrompt },
-          { role: "user", content: "Suggest 6-8 candidate intel sources now." },
+          { role: "user", content: "Suggest 8-12 candidate intel sources now, mixing editorial and ad/maps keyword sources." },
         ],
         tools: [{
           type: "function",
@@ -122,7 +144,7 @@ Rules:
                       name: { type: "string" },
                       url: { type: "string" },
                       why_relevant: { type: "string" },
-                      type: { type: "string", enum: ["news", "blog", "directory", "listicle"] },
+                      type: { type: "string", enum: ["news", "blog", "directory", "listicle", "ad_signal_meta", "ad_signal_google", "google_maps"] },
                     },
                     required: ["name", "url", "why_relevant", "type"],
                     additionalProperties: false,
@@ -158,23 +180,40 @@ Rules:
       }
     }
 
-    // 3. Filter dupes / blocked, then validate with Firecrawl /v2/map (parallel, capped)
+    // 3. Filter dupes / blocked, then validate editorial URLs with Firecrawl /v2/map.
+    //    Ad/maps keyword suggestions don't have URLs to validate — pass them through after dedupe.
     const HARD_BLOCK = ["facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com", "youtube.com", "tiktok.com", "google.com", "bing.com", "wikipedia.org", "amazon.com", "ebay.com"];
+    const AD_TYPES = new Set(["ad_signal_meta", "ad_signal_google", "google_maps"]);
 
-    const candidates: Suggestion[] = [];
-    const seen = new Set<string>();
+    const editorial: Suggestion[] = [];
+    const adKeyword: Suggestion[] = [];
+    const seenHosts = new Set<string>();
+    const seenAdKw = new Set<string>(existingAdKeywords);
+
     for (const s of raw) {
-      if (!s?.url || !s?.name) continue;
+      if (!s?.name || !s?.type) continue;
+      const name = s.name.trim();
+      if (!name) continue;
+
+      if (AD_TYPES.has(s.type)) {
+        const key = `${s.type}::${name.toLowerCase()}`;
+        if (seenAdKw.has(key)) continue;
+        seenAdKw.add(key);
+        adKeyword.push({ ...s, name, url: "" });
+        continue;
+      }
+
+      // editorial — needs a URL
+      if (!s.url) continue;
       let url = s.url.trim();
       if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
       const host = rootDomain(url);
       if (!host) continue;
       if (existingHosts.has(host)) continue;
       if (HARD_BLOCK.some((b) => host === b || host.endsWith(`.${b}`))) continue;
-      if (seen.has(host)) continue;
-      seen.add(host);
-      candidates.push({ ...s, url, name: s.name.trim() });
-      if (candidates.length >= 8) break;
+      if (seenHosts.has(host)) continue;
+      seenHosts.add(host);
+      editorial.push({ ...s, url, name });
     }
 
     const validateOne = async (c: Suggestion): Promise<Suggestion | null> => {
@@ -194,9 +233,10 @@ Rules:
       }
     };
 
-    const validated = (await Promise.all(candidates.map(validateOne))).filter(Boolean) as Suggestion[];
+    const validatedEditorial = (await Promise.all(editorial.slice(0, 8).map(validateOne))).filter(Boolean) as Suggestion[];
+    const suggestions = [...validatedEditorial, ...adKeyword.slice(0, 6)];
 
-    return json(200, { suggestions: validated });
+    return json(200, { suggestions });
   } catch (e) {
     console.error("discover-intel-sources error", e);
     return json(500, { error: e instanceof Error ? e.message : "Unknown error" });

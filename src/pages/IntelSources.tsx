@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 type Kind = "news" | "job_board" | "talent_marketplace" | "ad_signal_meta" | "ad_signal_google" | "google_maps";
 type Source = { id: string; name: string; url: string; enabled: boolean; created_at: string; auto_promoted: boolean; kind: Kind };
-type Suggestion = { name: string; url: string; why_relevant: string; type: "news" | "blog" | "directory" | "listicle" };
+type Suggestion = { name: string; url: string; why_relevant: string; type: "news" | "blog" | "directory" | "listicle" | "ad_signal_meta" | "ad_signal_google" | "google_maps" };
 
 const DEFAULTS = [
   { name: "Techcabal", url: "https://techcabal.com/" },
@@ -126,20 +126,27 @@ const IntelSources = () => {
 
   const addSuggestion = async (s: Suggestion) => {
     if (!user) return;
-    const host = (() => { try { return new URL(s.url).hostname; } catch { return s.url; } })();
-    setAddingHosts((p) => new Set(p).add(host));
+    const AD_TYPES = ["ad_signal_meta", "ad_signal_google", "google_maps"] as const;
+    const isAd = (AD_TYPES as readonly string[]).includes(s.type);
+    const kind: Kind = isAd ? (s.type as Kind) : "news";
+    const dedupeKey = isAd ? `${s.type}::${s.name.toLowerCase()}` : s.url;
+    setAddingHosts((p) => new Set(p).add(dedupeKey));
     try {
       const { error } = await supabase.from("intel_sources").insert({
-        user_id: user.id, name: s.name, url: s.url, enabled: true,
-      });
+        user_id: user.id,
+        name: s.name,
+        url: isAd ? (s.url || s.name) : s.url,
+        enabled: true,
+        kind,
+      } as never);
       if (error) throw error;
       toast.success(`Added ${s.name}`);
-      setSuggestions((prev) => (prev ?? []).filter((x) => x.url !== s.url));
+      setSuggestions((prev) => (prev ?? []).filter((x) => (isAd ? !(x.type === s.type && x.name === s.name) : x.url !== s.url)));
       load();
     } catch (e: any) {
       toast.error(e?.message ?? "Failed to add");
     } finally {
-      setAddingHosts((p) => { const n = new Set(p); n.delete(host); return n; });
+      setAddingHosts((p) => { const n = new Set(p); n.delete(dedupeKey); return n; });
     }
   };
 
@@ -236,17 +243,26 @@ const IntelSources = () => {
               <p className="text-sm text-muted-foreground">No fresh suggestions right now. Try refreshing or update your offerings.</p>
             ) : (
               <ul className="space-y-2">
-                {suggestions.map((s) => {
-                  const host = (() => { try { return new URL(s.url).hostname; } catch { return s.url; } })();
-                  const adding = addingHosts.has(host);
+                {suggestions.map((s, idx) => {
+                  const AD_TYPES = ["ad_signal_meta", "ad_signal_google", "google_maps"];
+                  const isAd = AD_TYPES.includes(s.type);
+                  const dedupeKey = isAd ? `${s.type}::${s.name.toLowerCase()}` : s.url;
+                  const adding = addingHosts.has(dedupeKey);
+                  const typeLabel = s.type.replace("ad_signal_", "").replace("_", " ");
                   return (
-                    <li key={s.url} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                    <li key={`${s.type}-${s.url || s.name}-${idx}`} className="flex items-start justify-between gap-3 rounded-md border p-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium truncate">{s.name}</p>
-                          <Badge variant="outline" className="text-[10px] capitalize">{s.type}</Badge>
+                          <Badge variant={isAd ? "secondary" : "outline"} className="text-[10px] capitalize">
+                            {isAd ? `${typeLabel} keyword` : s.type}
+                          </Badge>
                         </div>
-                        <a href={s.url} target="_blank" rel="noreferrer" className="block text-xs text-primary truncate hover:underline">{s.url}</a>
+                        {s.url ? (
+                          <a href={s.url} target="_blank" rel="noreferrer" className="block text-xs text-primary truncate hover:underline">{s.url}</a>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">Keyword source — scanned via Apify</p>
+                        )}
                         <p className="text-xs text-muted-foreground mt-1">{s.why_relevant}</p>
                       </div>
                       <Button size="sm" variant="outline" disabled={adding} onClick={() => addSuggestion(s)} className="shrink-0">
