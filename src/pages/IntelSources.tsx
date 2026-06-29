@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 type Kind = "news" | "job_board" | "talent_marketplace" | "ad_signal_meta" | "ad_signal_google" | "google_maps";
 type Source = { id: string; name: string; url: string; enabled: boolean; created_at: string; auto_promoted: boolean; kind: Kind };
-type Suggestion = { name: string; url: string; why_relevant: string; type: "news" | "blog" | "directory" | "listicle" };
+type Suggestion = { name: string; url: string; why_relevant: string; type: "news" | "blog" | "directory" | "listicle" | "ad_signal_meta" | "ad_signal_google" | "google_maps" };
 
 const DEFAULTS = [
   { name: "Techcabal", url: "https://techcabal.com/" },
