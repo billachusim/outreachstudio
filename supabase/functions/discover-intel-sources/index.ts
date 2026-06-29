@@ -144,7 +144,7 @@ Rules:
                       name: { type: "string" },
                       url: { type: "string" },
                       why_relevant: { type: "string" },
-                      type: { type: "string", enum: ["news", "blog", "directory", "listicle"] },
+                      type: { type: "string", enum: ["news", "blog", "directory", "listicle", "ad_signal_meta", "ad_signal_google", "google_maps"] },
                     },
                     required: ["name", "url", "why_relevant", "type"],
                     additionalProperties: false,
