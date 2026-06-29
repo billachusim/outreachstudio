@@ -243,17 +243,26 @@ const IntelSources = () => {
               <p className="text-sm text-muted-foreground">No fresh suggestions right now. Try refreshing or update your offerings.</p>
             ) : (
               <ul className="space-y-2">
-                {suggestions.map((s) => {
-                  const host = (() => { try { return new URL(s.url).hostname; } catch { return s.url; } })();
-                  const adding = addingHosts.has(host);
+                {suggestions.map((s, idx) => {
+                  const AD_TYPES = ["ad_signal_meta", "ad_signal_google", "google_maps"];
+                  const isAd = AD_TYPES.includes(s.type);
+                  const dedupeKey = isAd ? `${s.type}::${s.name.toLowerCase()}` : s.url;
+                  const adding = addingHosts.has(dedupeKey);
+                  const typeLabel = s.type.replace("ad_signal_", "").replace("_", " ");
                   return (
-                    <li key={s.url} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                    <li key={`${s.type}-${s.url || s.name}-${idx}`} className="flex items-start justify-between gap-3 rounded-md border p-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium truncate">{s.name}</p>
-                          <Badge variant="outline" className="text-[10px] capitalize">{s.type}</Badge>
+                          <Badge variant={isAd ? "secondary" : "outline"} className="text-[10px] capitalize">
+                            {isAd ? `${typeLabel} keyword` : s.type}
+                          </Badge>
                         </div>
-                        <a href={s.url} target="_blank" rel="noreferrer" className="block text-xs text-primary truncate hover:underline">{s.url}</a>
+                        {s.url ? (
+                          <a href={s.url} target="_blank" rel="noreferrer" className="block text-xs text-primary truncate hover:underline">{s.url}</a>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">Keyword source — scanned via Apify</p>
+                        )}
                         <p className="text-xs text-muted-foreground mt-1">{s.why_relevant}</p>
                       </div>
                       <Button size="sm" variant="outline" disabled={adding} onClick={() => addSuggestion(s)} className="shrink-0">
