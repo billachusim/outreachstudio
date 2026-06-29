@@ -92,12 +92,19 @@ Deno.serve(async (req) => {
     }
 
     // 2. AI suggestion call (structured tool output)
-    const sysPrompt = `You are an outreach intel researcher. Suggest 6-8 high-signal news sites, blogs, listicle publishers, or business directories that would be rich sources of trigger events (funding, launches, expansion) and lists of businesses for the user described below.
+    const sysPrompt = `You are an outreach intel researcher. Suggest 8-12 high-signal intel sources for this user across TWO categories:
+
+A) Editorial sources (news sites, blogs, listicle publishers, business directories) that publish trigger events (funding, launches, expansion) and lists of businesses. type = "news" | "blog" | "directory" | "listicle". Provide a real https URL.
+
+B) Ad-signal / map keyword sources that surface businesses actively spending on ads or running local services. These do NOT have URLs — instead the "name" field is a SEARCH KEYWORD (e.g. "dental clinic Lagos", "personal injury lawyer Houston", "SaaS HR Africa"). Provide an empty string for url. Choose at least 2-4 of these total across the three types:
+  - type = "ad_signal_meta"   → Meta Ads Library keyword for the user's target audience
+  - type = "ad_signal_google" → Google Ads Transparency keyword for the user's target audience
+  - type = "google_maps"      → Google Maps business category + city for local prospecting
 
 User region: ${region}${countryCode ? ` (${countryCode.toUpperCase()})` : ""}
 
 Offerings (what they sell):
-${offerings.map((o: any) => `- ${o.title}${o.tagline ? ` — ${o.tagline}` : ""}${o.target_audience ? ` (audience: ${o.target_audience})` : ""}`).join("\n") || "(none)"}
+${offerings.map((o: any) => `- ${o.title}${o.tagline ? ` — ${o.tagline}` : ""}${o.target_audience ? ` (audience: ${o.target_audience})` : ""}${o.trigger_keywords ? ` (triggers: ${o.trigger_keywords})` : ""}`).join("\n") || "(none)"}
 
 Active campaigns:
 ${campaigns.map((c: any) => `- ${c.name}${c.category ? ` [${c.category}]` : ""}${c.city ? ` in ${c.city}` : ""}${c.keywords ? ` — ${c.keywords}` : ""}`).join("\n") || "(none)"}
@@ -105,14 +112,12 @@ ${campaigns.map((c: any) => `- ${c.name}${c.category ? ` [${c.category}]` : ""}$
 Memory:
 ${memories.map((m: any) => `- ${m.title}: ${(m.content || "").slice(0, 200)}`).join("\n") || "(none)"}
 
-Already-known sources to skip:
-${[...existingHosts].join(", ")}
+Already-known editorial domains to skip: ${[...existingHosts].join(", ") || "(none)"}
+Already-known ad/maps keywords to skip: ${[...existingAdKeywords].map((k) => k.split("::")[1]).join(", ") || "(none)"}
 
 Rules:
-- Prefer publishers in the user's region or that frequently cover it.
-- Prefer sites that publish "Top X" / "Best Y in Z" listicles or fundraise news.
-- Avoid social networks, search engines, marketplaces, government, education sites.
-- Return a real, working https URL for each (homepage or category page).`;
+- For editorial sources: prefer publishers in the user's region; avoid social networks, search engines, marketplaces, government, education sites; return a real working https URL.
+- For ad/maps keyword sources: tailor keywords to the user's target audience and region (include city/country when local intent matters). Keep keywords short (2-6 words).`;
 
     const aiRes = await fetch(LOVABLE_AI, {
       method: "POST",
