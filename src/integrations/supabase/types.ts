@@ -762,6 +762,7 @@ export type Database = {
       }
       leads: {
         Row: {
+          ad_context: Json | null
           address: string | null
           business_name: string
           campaign_id: string | null
@@ -788,6 +789,7 @@ export type Database = {
           x_url: string | null
         }
         Insert: {
+          ad_context?: Json | null
           address?: string | null
           business_name: string
           campaign_id?: string | null
@@ -814,6 +816,7 @@ export type Database = {
           x_url?: string | null
         }
         Update: {
+          ad_context?: Json | null
           address?: string | null
           business_name?: string
           campaign_id?: string | null
