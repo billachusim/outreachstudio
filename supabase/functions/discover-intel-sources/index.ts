@@ -71,8 +71,9 @@ Deno.serve(async (req) => {
       supabase.from("offerings").select("title,tagline,target_audience,trigger_keywords").eq("user_id", user.id).limit(20),
       supabase.from("agent_memories").select("title,content").eq("user_id", user.id).limit(15),
       supabase.from("campaigns").select("name,category,city,keywords").eq("user_id", user.id).eq("status", "active").limit(20),
-      supabase.from("intel_sources").select("url").eq("user_id", user.id),
+      supabase.from("intel_sources").select("url,name,kind").eq("user_id", user.id),
     ]);
+
 
     const region = profileRes.data?.outreach_region ?? "Global";
     const countryCode = profileRes.data?.outreach_country_code ?? "";
