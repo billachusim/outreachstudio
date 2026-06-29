@@ -25,12 +25,24 @@ function rootDomain(urlStr: string): string | null {
   try { return new URL(urlStr).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
 }
 
+type SuggestionType = "news" | "blog" | "directory" | "listicle" | "ad_signal_meta" | "ad_signal_google" | "google_maps";
 type Suggestion = {
   name: string;
   url: string;
   why_relevant: string;
-  type: "news" | "blog" | "directory" | "listicle";
+  type: SuggestionType;
 };
+
+const TYPE_TO_KIND: Record<SuggestionType, string> = {
+  news: "news",
+  blog: "news",
+  directory: "news",
+  listicle: "news",
+  ad_signal_meta: "ad_signal_meta",
+  ad_signal_google: "ad_signal_google",
+  google_maps: "google_maps",
+};
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
