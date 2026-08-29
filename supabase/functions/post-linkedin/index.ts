@@ -51,7 +51,12 @@ Deno.serve(async (req) => {
     const meRes = await fetch(`${GATEWAY}/v2/userinfo`, { method: "GET", headers: gwHeaders });
     const meText = await meRes.text();
     if (!meRes.ok) {
-      return json(meRes.status, { error: `LinkedIn /userinfo failed: ${meText}` });
+      if (meRes.status === 401 || meText.includes("EXPIRED_ACCESS_TOKEN") || meText.includes("REVOKED_ACCESS_TOKEN")) {
+        return json(200, {
+          error: "Your LinkedIn connection expired. Reconnect LinkedIn on the Channels page, then try posting again.",
+        });
+      }
+      return json(200, { error: `LinkedIn rejected the request: ${meText}` });
     }
     const me = JSON.parse(meText);
     const memberId = me.sub;
@@ -78,7 +83,12 @@ Deno.serve(async (req) => {
     });
     const postText = await postRes.text();
     if (!postRes.ok) {
-      return json(postRes.status, { error: `LinkedIn post failed: ${postText}` });
+      if (postRes.status === 401 || postText.includes("EXPIRED_ACCESS_TOKEN") || postText.includes("REVOKED_ACCESS_TOKEN")) {
+        return json(200, {
+          error: "Your LinkedIn connection expired. Reconnect LinkedIn on the Channels page, then try posting again.",
+        });
+      }
+      return json(200, { error: `LinkedIn post failed: ${postText}` });
     }
     const postJson = postText ? JSON.parse(postText) : {};
     const postId = postJson.id ?? postRes.headers.get("x-restli-id") ?? null;
