@@ -20,6 +20,7 @@ import Channels from "./pages/Channels";
 import Intel from "./pages/Intel";
 import IntelSources from "./pages/IntelSources";
 import Social from "./pages/Social";
+import PetCare from "./pages/PetCare";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -43,6 +44,7 @@ const App = () => (
               <Route path="/" element={<Dashboard />} />
               <Route path="/offerings" element={<Offerings />} />
               <Route path="/campaigns" element={<Campaigns />} />
+              <Route path="/pet-care" element={<PetCare />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/leads" element={<Leads />} />
               <Route path="/templates" element={<Templates />} />

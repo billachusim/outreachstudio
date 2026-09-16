@@ -158,6 +158,10 @@ Deno.serve(async (req) => {
       (campaign as any).social_cap;
     const effectiveCap = Math.min(run.daily_send_cap, channelCap ?? run.daily_send_cap);
     const campaignMode: "job_hunt" | "outreach" = ((campaign as any).mode === "job_hunt") ? "job_hunt" : "outreach";
+    // Partner-acquisition campaigns (e.g. Pet Care Card) use a dedicated
+    // discovery function and their own messaging angle. They run continuously
+    // until the user pauses the campaign.
+    const isPartner = (campaign as any).mode === "partner_acquisition";
     const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? "";
 
     // STATE: queued -> discovering (just transition + log)
@@ -180,6 +184,34 @@ Deno.serve(async (req) => {
         await updateRun({ state: "enriching" as never, leads_found: have });
         return json(200, { ok: true, transition: "discovering->enriching" });
       }
+
+      // === Partner acquisition: dedicated U.S. pet-sitter discovery ===
+      if (isPartner) {
+        const supaUrl = Deno.env.get("SUPABASE_URL")!;
+        const dRes = await fetch(`${supaUrl}/functions/v1/discover-pet-sitters`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: req.headers.get("Authorization") ?? `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify({ campaignId: campaign.id, userId: run.user_id, cityCount: 3, perCity: 6 }),
+        });
+        const dJson = await dRes.json().catch(() => ({}));
+        if (!dRes.ok) return await fail(dJson?.error ?? "Pet-sitter discovery failed");
+        const addedP = dJson?.inserted ?? 0;
+        await logEvent(
+          "discovered",
+          addedP > 0
+            ? `Found ${addedP} qualified pet-sitting business${addedP === 1 ? "" : "es"} (${(dJson?.cities ?? []).join(", ")}).`
+            : `No new qualified businesses this pass (${(dJson?.cities ?? []).join(", ")}).`,
+        );
+        const totalP = have + addedP;
+        const nextP = totalP >= run.target_lead_count || addedP === 0 ? "enriching" : "discovering";
+        await updateRun({ state: nextP as never, leads_found: totalP });
+        return json(200, { ok: true, inserted: addedP, transition: `discovering->${nextP}` });
+      }
+
+
 
       // === Raw-pool sweep: reuse user's unassigned leads matching this campaign ===
       const need = run.target_lead_count - have;
@@ -446,9 +478,10 @@ Deno.serve(async (req) => {
     if (run.state === "drafting") {
       const { data: lead } = await supabase
         .from("leads")
-        .select("id, business_name, website, contact_email, contact_name, notes, status, campaign_id")
+        .select("id, business_name, website, contact_email, contact_name, notes, status, campaign_id, city, state, services, relevance_reason, enrichment_summary")
         .eq("campaign_id", campaign.id)
         .eq("status", "enriched")
+        .eq("opted_out", false)
         .not("contact_email", "is", null)
         .order("score", { ascending: false, nullsFirst: false })
         .limit(1)
@@ -480,7 +513,15 @@ Pricing: ${offering.pricing ?? ""}
 Demo URL: ${offering.demo_url ?? ""}
 Testimonial: ${offering.testimonial ?? ""}` : "OFFERING: (none — write a warm generic intro)";
 
-      const leadBlock = `LEAD
+      const leadBlock = isPartner
+        ? `BUSINESS
+Name: ${lead.business_name}
+Location: ${[(lead as any).city, (lead as any).state].filter(Boolean).join(", ")}
+Website: ${lead.website ?? ""}
+Services: ${(lead as any).services ?? ""}
+Why it fits: ${(lead as any).relevance_reason ?? ""}
+Notes: ${lead.notes ?? ""}`
+        : `LEAD
 Business: ${lead.business_name}
 Contact name: ${lead.contact_name ?? "(unknown)"}
 Website: ${lead.website ?? ""}
@@ -492,7 +533,25 @@ Notes: ${lead.notes ?? ""}`;
         body: JSON.stringify({
           model: "google/gemini-2.5-flash",
           messages: [
-            { role: "system", content: `You are an expert B2B cold-email copywriter. Write a short, personalized cold email pitch that feels human, not templated. Avoid corporate jargon, no "I hope this email finds you well". Lead with relevance. Keep body under 130 words. End with one clear, low-friction CTA. Do NOT invent facts.` },
+            {
+              role: "system",
+              content: isPartner
+                ? `You are Bill, the founder of Pet Care Card (https://petcarecards.app). Write a short, warm, first-person email to ONE U.S. pet-sitting business, sounding like a founder who actually looked at their site — not marketing copy.
+
+Rules:
+- Open by naming the business and one specific, true detail from the BUSINESS block (their services, city, or intake process). Never invent facts.
+- Explain in one or two sentences that Pet Care Card lets a pet owner build one care card with feeding instructions, routines, medications, vet and emergency contacts, then share it with their sitter.
+- Mention that owners can just talk about their pet instead of typing everything (voice to care card).
+- Offer a free test with a couple of their upcoming clients.
+- Close with one low-friction question: would they be open to trying it.
+- Body under 130 words, plain text, conversational. No bullet lists, no jargon, no "I hope this email finds you well".
+- Sign off exactly:
+Best,
+Bill
+Pet Care Card
+https://petcarecards.app`
+                : `You are an expert B2B cold-email copywriter. Write a short, personalized cold email pitch that feels human, not templated. Avoid corporate jargon, no "I hope this email finds you well". Lead with relevance. Keep body under 130 words. End with one clear, low-friction CTA. Do NOT invent facts.`,
+            },
             { role: "user", content: `Tone: warm, concise, professional, no fluff\n\n${offeringBlock}\n\n${leadBlock}\n\nWrite the cold email pitch now.` },
           ],
           tools: [{
@@ -659,6 +718,7 @@ Notes: ${lead.notes ?? ""}`;
         .select(leadSelect)
         .eq("campaign_id", campaign.id)
         .eq("status", "drafted")
+        .eq("opted_out", false)
         .not(recipientCol, "is", null)
         .order("score", { ascending: false, nullsFirst: false })
         .limit(1)
@@ -666,6 +726,12 @@ Notes: ${lead.notes ?? ""}`;
 
 
       if (!lead) {
+        if (isPartner) {
+          // Keep hunting: this campaign runs until the user pauses it.
+          await logEvent("info", `Nothing left to send for "${campaign.name}" — looking for more pet-sitting businesses.`);
+          await updateRun({ state: "discovering" as never, target_lead_count: run.target_lead_count + 20 });
+          return json(200, { ok: true, transition: "sending->discovering" });
+        }
         await logEvent("done", `Outreach complete for "${campaign.name}". Sent ${run.leads_sent}.`);
         await updateRun({ state: "done" as never });
 

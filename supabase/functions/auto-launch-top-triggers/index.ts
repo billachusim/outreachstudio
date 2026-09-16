@@ -56,8 +56,21 @@ Deno.serve(async (req) => {
     // Skip dormant users to avoid burning AI credits on inactive accounts.
     const activeIds = new Set(await filterActiveUsers(admin, Array.from(perUser.keys()), 14));
 
+    // Exclusive focus: users running an active partner-acquisition campaign get
+    // no auto-launched intel campaigns competing for the daily email budget.
+    const { data: focusCamps } = await admin
+      .from("campaigns")
+      .select("user_id")
+      .eq("status", "active")
+      .eq("mode", "partner_acquisition");
+    const focusedUsers = new Set((focusCamps ?? []).map((c: { user_id: string }) => c.user_id));
+
     for (const [userId, userItems] of perUser) {
       if (!activeIds.has(userId)) continue;
+      if (focusedUsers.has(userId)) {
+        results.push({ userId, intelId: "-", status: "skipped", error: "focus campaign active" });
+        continue;
+      }
       for (const intel of userItems!) {
         try {
           const built = await buildProposal(admin, userId, {
