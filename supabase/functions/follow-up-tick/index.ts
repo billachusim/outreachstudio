@@ -54,10 +54,15 @@ Deno.serve(async (req) => {
     for (const seq of due) {
       // Lead status check — skip if replied/won/lost
       const { data: lead } = await supabase
-        .from("leads").select("id, business_name, contact_email, contact_name, website, notes, status, campaign_id")
+        .from("leads").select("id, business_name, contact_email, contact_name, website, notes, status, campaign_id, opted_out, city, state, services, relevance_reason")
         .eq("id", seq.lead_id).maybeSingle();
       if (!lead) {
         await supabase.from("pitch_sequences").update({ status: "cancelled", reason: "lead deleted" }).eq("id", seq.id);
+        continue;
+      }
+      if ((lead as any).opted_out) {
+        await supabase.from("pitch_sequences").update({ status: "cancelled", reason: "opted out / asked not to be contacted" }).eq("id", seq.id);
+        skipped++;
         continue;
       }
       if (["replied", "won", "lost"].includes(lead.status)) {
@@ -143,8 +148,10 @@ Deno.serve(async (req) => {
 
       // Load offering + parent pitch for context
       let offering: any = null;
+      let isPartner = false;
       if (lead.campaign_id) {
-        const { data: camp } = await supabase.from("campaigns").select("offering_id").eq("id", lead.campaign_id).maybeSingle();
+        const { data: camp } = await supabase.from("campaigns").select("offering_id, mode").eq("id", lead.campaign_id).maybeSingle();
+        isPartner = (camp as any)?.mode === "partner_acquisition";
         if (camp?.offering_id) {
           const { data: off } = await supabase.from("offerings").select("*").eq("id", camp.offering_id).maybeSingle();
           offering = off;
@@ -160,7 +167,23 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           model: "google/gemini-2.5-flash",
           messages: [
-            { role: "system", content: `You are writing follow-up #${seq.step} to a cold email pitch. Rules: ${angle} Plain text. No "just following up" cliché. Reference original subject naturally.` },
+            {
+              role: "system",
+              content: isPartner
+                ? `You are Bill, founder of Pet Care Card (https://petcarecards.app), writing follow-up #${seq.step} to a U.S. pet-sitting business that has not replied.
+
+Rules:
+- Very short: 60 words max, plain text, friendly and low-pressure.
+- Remind them in one line what Pet Care Card does: owners build one care card with feeding, routines, medications, vet and emergency contacts, then share it with their sitter.
+- Repeat the free test offer with a couple of their clients.
+- ${seq.step >= 2 ? "This is the final message — say you will not follow up again and leave the door open." : "One friendly nudge only."}
+- Never guilt-trip, never say "just following up on my previous email" twice, no bullet lists.
+- Sign off exactly:
+Thanks,
+Bill
+https://petcarecards.app`
+                : `You are writing follow-up #${seq.step} to a cold email pitch. Rules: ${angle} Plain text. No "just following up" cliché. Reference original subject naturally.`,
+            },
             { role: "user", content: `OFFERING: ${offering ? `${offering.title} — ${offering.tagline ?? ""}` : "(none)"}\n\nLEAD: ${lead.business_name} (${lead.contact_name ?? "no name"})\nNotes: ${lead.notes ?? ""}\n\nORIGINAL SUBJECT: ${parent?.subject ?? "(unknown)"}\nORIGINAL BODY:\n${parent?.body ?? "(unknown)"}\n\nWrite the follow-up.` },
           ],
           tools: [{ type: "function", function: { name: "return_pitch", parameters: { type: "object", properties: { subject: { type: "string" }, body: { type: "string" } }, required: ["subject", "body"], additionalProperties: false } } }],
@@ -217,7 +240,8 @@ Deno.serve(async (req) => {
         .from("pitch_sequences").select("id", { count: "exact", head: true })
         .eq("campaign_id", campaignId).eq("status", "scheduled");
       if ((pending ?? 0) === 0) {
-        const { data: c } = await supabase.from("campaigns").select("status").eq("id", campaignId).maybeSingle();
+        const { data: c } = await supabase.from("campaigns").select("status, mode").eq("id", campaignId).maybeSingle();
+        if (c && (c as any).mode === "partner_acquisition") continue; // runs until the user pauses it
         if (c && c.status !== "archived") {
           await supabase.from("campaigns").update({ status: "archived" } as never).eq("id", campaignId);
           archived++;

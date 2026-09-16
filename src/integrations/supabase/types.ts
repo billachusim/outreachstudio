@@ -766,8 +766,10 @@ export type Database = {
           address: string | null
           business_name: string
           campaign_id: string | null
+          city: string | null
           contact_email: string | null
           contact_name: string | null
+          country: string | null
           created_at: string
           enrichment_summary: string | null
           facebook_url: string | null
@@ -778,10 +780,17 @@ export type Database = {
           last_enriched_at: string | null
           linkedin_url: string | null
           notes: string | null
+          opted_out: boolean
+          partner_stage: string
+          partner_stage_at: string | null
           phone: string | null
+          relevance_reason: string | null
           reply_intent: string | null
           root_domain: string | null
           score: number
+          services: string | null
+          source_url: string | null
+          state: string | null
           status: Database["public"]["Enums"]["lead_status"]
           updated_at: string
           user_id: string
@@ -793,8 +802,10 @@ export type Database = {
           address?: string | null
           business_name: string
           campaign_id?: string | null
+          city?: string | null
           contact_email?: string | null
           contact_name?: string | null
+          country?: string | null
           created_at?: string
           enrichment_summary?: string | null
           facebook_url?: string | null
@@ -805,10 +816,17 @@ export type Database = {
           last_enriched_at?: string | null
           linkedin_url?: string | null
           notes?: string | null
+          opted_out?: boolean
+          partner_stage?: string
+          partner_stage_at?: string | null
           phone?: string | null
+          relevance_reason?: string | null
           reply_intent?: string | null
           root_domain?: string | null
           score?: number
+          services?: string | null
+          source_url?: string | null
+          state?: string | null
           status?: Database["public"]["Enums"]["lead_status"]
           updated_at?: string
           user_id: string
@@ -820,8 +838,10 @@ export type Database = {
           address?: string | null
           business_name?: string
           campaign_id?: string | null
+          city?: string | null
           contact_email?: string | null
           contact_name?: string | null
+          country?: string | null
           created_at?: string
           enrichment_summary?: string | null
           facebook_url?: string | null
@@ -832,10 +852,17 @@ export type Database = {
           last_enriched_at?: string | null
           linkedin_url?: string | null
           notes?: string | null
+          opted_out?: boolean
+          partner_stage?: string
+          partner_stage_at?: string | null
           phone?: string | null
+          relevance_reason?: string | null
           reply_intent?: string | null
           root_domain?: string | null
           score?: number
+          services?: string | null
+          source_url?: string | null
+          state?: string | null
           status?: Database["public"]["Enums"]["lead_status"]
           updated_at?: string
           user_id?: string
@@ -1044,6 +1071,8 @@ export type Database = {
       }
       pitches: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           body: string | null
           created_at: string
           id: string
@@ -1056,6 +1085,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           body?: string | null
           created_at?: string
           id?: string
@@ -1068,6 +1099,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           body?: string | null
           created_at?: string
           id?: string
