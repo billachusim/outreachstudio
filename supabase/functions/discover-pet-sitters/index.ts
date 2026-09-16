@@ -62,6 +62,10 @@ const HOST_BLOCKLIST = [
   "tripadvisor.com", "indeed.com", "ziprecruiter.com", "glassdoor.com",
   "medium.com", "substack.com", "eventbrite.com", "groupon.com", "chewy.com",
   "petco.com", "petsmart.com", "akc.org", "avma.org", "aspca.org",
+  "petbacker.com", "vetster.com", "zippia.com", "ed2go.com", "petcareins.com",
+  "petsitllc.com", "petsitterplus.com", "timetopet.com", "precisepetcare.com",
+  "simplyfortheanimals.com", "udemy.com", "coursera.org", "salary.com",
+  "payscale.com", "expertise.com", "bark.com", "porch.com", "homeguide.com",
 ];
 
 const NON_US_TLDS = [".ng", ".uk", ".co.uk", ".ca", ".au", ".in", ".de", ".fr", ".nl", ".ie", ".nz", ".za", ".ph", ".sg"];
