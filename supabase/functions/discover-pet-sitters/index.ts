@@ -84,10 +84,29 @@ function looksNonUs(host: string): boolean {
   return NON_US_TLDS.some((t) => host.endsWith(t));
 }
 
+const GENERIC_TITLES = ["home", "about", "about us", "services", "our services", "welcome", "contact", "contact us", "commission", "pet care", "pet sitting", "index", "blog", "faq", "rates", "pricing", "reviews", "team"];
+
+// Article / directory / jobs pages masquerading as businesses.
+const NON_BUSINESS_PATTERNS = [
+  /\bjobs?\b/i, /\bhiring\b/i, /\bcareers?\b/i, /\bsalary\b/i, /\bapply now\b/i,
+  /\bideas\b/i, /\bhow to\b/i, /\bguide\b/i, /\bblog\b/i, /\bnews\b/i,
+  /\btips\b/i, /\bchecklist\b/i, /\btemplate\b/i, /\bvs\.?\b/i,
+  /\b(?:top|best|cheapest)\s+\d+/i, /^\d+\s/, /\bdirectory\b/i, /\blisting/i,
+  /\bfind (?:a|the)\b/i, /\bnear me\b/i, /\bcost(?:s)?\b/i, /\bwhat is\b/i,
+  /\bcourse\b/i, /\bcertification\b/i, /\bassociation\b/i, /\binsurance\b/i,
+  /\bsoftware\b/i, /\bapp\b/i, /\bfranchise\b/i, /\bmarketplace\b/i,
+];
+
+const NON_BUSINESS_URL_PATTERNS = [/\/blog\//i, /\/jobs?\//i, /\/careers?\//i, /\/articles?\//i, /\/news\//i, /\/guides?\//i, /\/directory\//i, /\/search\b/i, /\/tag\//i, /\/category\//i];
+
+function nameFromHost(host: string): string {
+  return host.split(".")[0].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function deriveBusinessName(title: string, host: string): string {
   const clean = (title || "").split(/[|·•\-–—:]/)[0].trim();
-  if (clean.length > 2 && clean.length < 80) return clean;
-  return host.split(".")[0].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  if (clean.length > 2 && clean.length < 60 && !GENERIC_TITLES.includes(clean.toLowerCase())) return clean;
+  return nameFromHost(host);
 }
 
 function pickEmail(text: string, host: string): string | null {
@@ -271,6 +290,11 @@ Deno.serve(async (req) => {
         const host = rootDomain(item.url);
         if (!host || isBlockedHost(host) || looksNonUs(host)) { skipped.push(host ?? item.url); continue; }
         if (existingHosts.has(host) || seen.has(host)) { skipped.push(host); continue; }
+
+        // Reject articles, job posts, directories and listicles — we want real businesses.
+        const titleStr = item.title ?? "";
+        if (NON_BUSINESS_PATTERNS.some((re) => re.test(titleStr))) { skipped.push(`${host} (article/jobs page)`); continue; }
+        if (NON_BUSINESS_URL_PATTERNS.some((re) => re.test(item.url))) { skipped.push(`${host} (not a business page)`); continue; }
         seen.add(host);
 
         // Light scrape of the business site for public contact + service info
