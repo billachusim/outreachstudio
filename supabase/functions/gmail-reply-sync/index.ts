@@ -180,7 +180,8 @@ Deno.serve(async (req) => {
         // Pick the most recently-pitched lead whose contact_email ends with the same domain.
         if (!lead) {
           const fromDomain = fromAddr.split("@")[1]?.toLowerCase() ?? "";
-          if (fromDomain && fromDomain.includes(".")) {
+          const FREE = /^(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|aol|icloud|me|mac|proton|protonmail|gmx|mail|zoho|yandex)\./;
+          if (fromDomain && fromDomain.includes(".") && !FREE.test(fromDomain)) {
             const { data: domainLead } = await supabase
               .from("leads")
               .select("id, user_id, campaign_id, last_activity_at")
