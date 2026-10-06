@@ -197,7 +197,15 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ campaignId: campaign.id, userId: run.user_id, cityCount: 3, perCity: 6 }),
         });
         const dJson = await dRes.json().catch(() => ({}));
-        if (!dRes.ok) return await fail(dJson?.error ?? "Pet-sitter discovery failed");
+        if (!dRes.ok) {
+          // Non-fatal: log and retry next tick instead of killing the run.
+          await logEvent("warn", `Pet-sitter discovery hiccup (${dRes.status}): ${String(dJson?.error ?? "unknown").slice(0, 200)}. Will retry.`);
+          if (have > 0) {
+            await updateRun({ state: "enriching" as never, leads_found: have });
+            return json(200, { ok: true, transition: "discovering->enriching (discovery error)" });
+          }
+          return json(200, { ok: true, retry: true });
+        }
         const addedP = dJson?.inserted ?? 0;
         await logEvent(
           "discovered",
