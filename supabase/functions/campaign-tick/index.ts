@@ -18,6 +18,7 @@ import {
   fetchUserRegion,
   firecrawlLocationParam,
 } from "../_shared/enrichment.ts";
+import { PETCARE_FROM, renderPetCareHtml, petcareText } from "../_shared/petcare-email.ts";
 import { checkBudget } from "../_shared/email-budget.ts";
 
 const corsHeaders = {
@@ -827,12 +828,12 @@ https://petcarecards.app`
             "X-Connection-Api-Key": RESEND_API_KEY,
           },
           body: JSON.stringify({
-            from: FROM,
+            from: isPartner ? PETCARE_FROM : FROM,
             to: [lead.contact_email],
             reply_to: REPLY_TO,
             subject: pitch.subject,
-            html: bodyToHtml(pitch.body ?? ""),
-            text: pitch.body,
+            html: isPartner ? renderPetCareHtml(pitch.body ?? "", { leadId: lead.id, campaign: "outreach" }) : bodyToHtml(pitch.body ?? ""),
+            text: isPartner ? petcareText(pitch.body ?? "", lead.id, "outreach") : pitch.body,
           }),
         });
         const sendJson = await sendRes.json().catch(() => ({}));

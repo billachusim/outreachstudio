@@ -232,7 +232,7 @@ Deno.serve(async (req) => {
           body,
           provider_message_id: id,
           status: "received",
-          payload: { source: "gmail-reply-sync", snippet: m.snippet ?? "", in_reply_to: inReplyTo, references },
+          payload: { source: "gmail-reply-sync", snippet: m.snippet ?? "", in_reply_to: inReplyTo, references, message_id_header: h("Message-ID") },
         }).select("id").maybeSingle();
 
         await supabase.from("pitch_sequences")

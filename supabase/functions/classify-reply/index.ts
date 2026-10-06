@@ -39,10 +39,12 @@ Deno.serve(async (req) => {
 
     // Resolve whether this reply belongs to a job_hunt lead so the classifier can use job-specific intents.
     let isJobHunt = false;
+    let isPartner = false;
     if (lid) {
       const { data: l } = await supabase
         .from("leads").select("campaigns:campaign_id(mode)").eq("id", lid).maybeSingle();
       isJobHunt = (l as any)?.campaigns?.mode === "job_hunt";
+      isPartner = (l as any)?.campaigns?.mode === "partner_acquisition";
     }
 
     const sysPrompt = isJobHunt
@@ -101,6 +103,13 @@ Deno.serve(async (req) => {
         provider: "classifier",
         payload: { intent, summary, is_job_hunt: isJobHunt },
       });
+    }
+    if (isPartner && messageId) {
+      await fetch(`${SUPABASE_URL}/functions/v1/petcare-auto-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+        body: JSON.stringify({ messageId, intent }),
+      }).catch((e) => console.error("auto-reply call failed", e));
     }
     return json(200, { intent, summary });
   } catch (e) {
