@@ -58,19 +58,34 @@ Deno.serve(async (req) => {
     if (autos.some((p: any) => p.payload?.in_reply_to_message === msg.id)) return json(200, { skipped: "already replied" });
     if (autos.length >= 3) { await note(`${lead.business_name} replied again. Over to you (3 auto-replies already sent).`, "warn"); return json(200, { skipped: "cap" }); }
 
-    const ai = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const sys = `You are Bill, founder of Pet Care Card, replying to a pet-sitting business that answered your outreach. Warm, short (60-130 words), plain text, no markdown, no links (a button is added). Answer any question they asked directly and honestly; if you don't know something (pricing beyond free trial, integrations), say you'll follow up personally. Then give 2-3 simple next steps to start. Highlight that clients can just talk instead of typing. Sign off "Bill". Never invent features.\n\n${SETUP}`;
+    const userText = `Business: ${lead.business_name}${lead.contact_name ? ` (contact: ${lead.contact_name})` : ""}\nTheir reply:\n${(msg.body ?? "").split(/\nOn .+wrote:/)[0].slice(0, 3000)}`;
+    const ai = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
       method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      headers: { "Lovable-API-Key": LOVABLE_API_KEY, Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json", "X-Lovable-AIG-SDK": "fetch" },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: `You are Bill, founder of Pet Care Card, replying to a pet-sitting business that answered your outreach. Warm, short (60-130 words), plain text, no markdown, no links (a button is added). Answer any question they asked directly and honestly; if you don't know something (pricing beyond free trial, integrations), say you'll follow up personally. Then give 2-3 simple next steps to start. Highlight that clients can just talk instead of typing. Sign off "Bill". Never invent features.\n\n${SETUP}` },
-          { role: "user", content: `Business: ${lead.business_name}${lead.contact_name ? ` (contact: ${lead.contact_name})` : ""}\nTheir reply:\n${(msg.body ?? "").split(/\nOn .+wrote:/)[0].slice(0, 3000)}` },
-        ],
+        model: "openai/gpt-6-astra", stream: true, store: false,
+        reasoning: { effort: "low" },
+        instructions: sys,
+        input: [{ role: "user", content: userText }],
       }),
     });
-    if (!ai.ok) { await note(`Couldn't write a reply to ${lead.business_name} (AI ${ai.status}).`, "error"); return json(200, { ok: false }); }
-    const body = ((await ai.json())?.choices?.[0]?.message?.content ?? "").trim();
+    if (!ai.ok || !ai.body) { await note(`Couldn't write a reply to ${lead.business_name} (AI ${ai.status}).`, "error"); return json(200, { ok: false }); }
+    let body = "";
+    {
+      const reader = ai.body.getReader(); const dec = new TextDecoder(); let buf = "";
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n"); buf = lines.pop() ?? "";
+        for (const ln of lines) {
+          if (!ln.startsWith("data:")) continue;
+          const d = ln.slice(5).trim(); if (!d || d === "[DONE]") continue;
+          try { const ev = JSON.parse(d); if (ev.type === "response.output_text.delta") body += ev.delta ?? ""; } catch { /* skip */ }
+        }
+      }
+      body = body.trim();
+    }
     if (!body || !RESEND_API_KEY || !lead.contact_email) return json(200, { ok: false, error: "nothing to send" });
 
     const to = msg.from_address || lead.contact_email;
