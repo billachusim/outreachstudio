@@ -1,3 +1,4 @@
+import { PETCARE_FROM, PETCARE_REPLY_TO, renderPetCareHtml, petcareText } from "../_shared/petcare-email.ts";
 // Process due pitch_sequences: skip if lead already replied; otherwise draft a follow-up
 // (different angle per step) and send via Resend. Cron-driven (every 10 min).
 // Budget-aware: each send is debited against the per-user, per-mode bucket
@@ -211,8 +212,11 @@ https://petcarecards.app`
           "X-Connection-Api-Key": RESEND_API_KEY,
         },
         body: JSON.stringify({
-          from: FROM, to: [lead.contact_email],
-          subject: `Re: ${subject}`, html: bodyToHtml(body), text: body,
+          from: isPartner ? PETCARE_FROM : FROM, to: [lead.contact_email],
+          ...(isPartner ? { reply_to: PETCARE_REPLY_TO } : {}),
+          subject: `Re: ${subject}`,
+          html: isPartner ? renderPetCareHtml(body, { leadId: lead.id, campaign: "followup" }) : bodyToHtml(body),
+          text: isPartner ? petcareText(body, lead.id, "followup") : body,
           ...(messageIdHeader ? { headers: { "Message-ID": messageIdHeader } } : {}),
         }),
       });
