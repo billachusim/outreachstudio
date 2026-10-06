@@ -4,7 +4,7 @@
 // Internal only: requires the service-role key.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { PETCARE_FROM, PETCARE_REPLY_TO, renderPetCareHtml, petcareText } from "../_shared/petcare-email.ts";
+import { PETCARE_FROM, resolvePetcareFrom, PETCARE_REPLY_TO, renderPetCareHtml, petcareText } from "../_shared/petcare-email.ts";
 
 const RESEND_GATEWAY = "https://connector-gateway.lovable.dev/resend";
 const json = (s: number, p: unknown) =>
@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}`, "X-Connection-Api-Key": RESEND_API_KEY },
       body: JSON.stringify({
-        from: PETCARE_FROM, to: [to], reply_to: PETCARE_REPLY_TO, subject,
+        from: await resolvePetcareFrom(LOVABLE_API_KEY, RESEND_API_KEY), to: [to], reply_to: PETCARE_REPLY_TO, subject,
         html: renderPetCareHtml(body, { leadId: lead.id, campaign: "reply", cta: "🎙️ Start your first care card" }),
         text: petcareText(body, lead.id, "reply"), headers,
       }),
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
     const rj = await res.json().catch(() => ({}));
     await supabase.from("channel_messages").insert({
       user_id: msg.user_id, lead_id: lead.id, campaign_id: lead.campaign_id, channel: "email", direction: "outbound",
-      to_address: to, from_address: PETCARE_FROM, subject, body, provider_message_id: (rj as any)?.id ?? null,
+      to_address: to, from_address: await resolvePetcareFrom(LOVABLE_API_KEY, RESEND_API_KEY), subject, body, provider_message_id: (rj as any)?.id ?? null,
       status: res.ok ? "sent" : "failed", error: res.ok ? null : ((rj as any)?.message ?? `HTTP ${res.status}`),
       payload: { source: "petcare-auto-reply", in_reply_to_message: msg.id, intent },
     });

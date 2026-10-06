@@ -1,7 +1,31 @@
 // Branded HTML for Pet Care Card outreach, follow-ups and auto-replies.
 // Sent through Resend from the verified domain; display name is Pet Care Card.
 
-export const PETCARE_FROM = "Bill at Pet Care Card <outreach@techfaculty.ng>";
+export const PETCARE_FROM_FALLBACK = "Bill at Pet Care Card <outreach@techfaculty.ng>";
+export const PETCARE_FROM_BRANDED = "Bill at Pet Care Card <bill@petcarecards.app>";
+// Kept for compatibility; prefer resolvePetcareFrom().
+export const PETCARE_FROM = PETCARE_FROM_FALLBACK;
+
+let cached: { from: string; at: number } | null = null;
+/** Uses bill@petcarecards.app once the domain is verified in Resend, else the fallback sender. */
+export async function resolvePetcareFrom(lovableKey?: string, resendKey?: string): Promise<string> {
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.from;
+  let from = PETCARE_FROM_FALLBACK;
+  try {
+    if (lovableKey && resendKey) {
+      const r = await fetch("https://connector-gateway.lovable.dev/resend/domains", {
+        headers: { Authorization: `Bearer ${lovableKey}`, "X-Connection-Api-Key": resendKey },
+      });
+      if (r.ok) {
+        const j = await r.json();
+        const d = (j?.data ?? []).find((x: any) => x.name === "petcarecards.app");
+        if (d?.status === "verified") from = PETCARE_FROM_BRANDED;
+      }
+    }
+  } catch { /* fallback */ }
+  cached = { from, at: Date.now() };
+  return from;
+}
 export const PETCARE_REPLY_TO = "thetechfaculty@gmail.com";
 export const PETCARE_URL = "https://petcarecards.app";
 
