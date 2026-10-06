@@ -45,11 +45,11 @@ export function renderPetCareHtml(text: string, opts: { leadId?: string; campaig
   const paras = esc(cleaned).split(/\n{2,}/)
     .map((p) => `<p style="margin:0 0 14px;line-height:1.6;font-size:15px;color:#2b2b2b">${p.replace(/\n/g, "<br/>")}</p>`)
     .join("");
-  const cta = esc(opts.cta ?? "🎙️ Record a free care card");
+  const cta = esc(opts.cta ?? "Record a free care card");
   return `<!doctype html><html><body style="margin:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
-<tr><td style="padding:0 0 16px;font-size:18px;font-weight:bold;color:#e0703a">🐾 Pet Care Card</td></tr>
+<tr><td style="padding:0 0 16px;font-size:18px;font-weight:bold;color:#e0703a">Pet Care Card</td></tr>
 <tr><td>${paras}</td></tr>
 <tr><td style="padding:8px 0 6px">
 <a href="${link}" style="display:inline-block;background:#e0703a;color:#ffffff;text-decoration:none;font-weight:bold;font-size:15px;padding:13px 22px;border-radius:10px">${cta}</a>

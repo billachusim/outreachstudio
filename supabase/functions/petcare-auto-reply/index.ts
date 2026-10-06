@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}`, "X-Connection-Api-Key": RESEND_API_KEY },
       body: JSON.stringify({
         from: await resolvePetcareFrom(LOVABLE_API_KEY, RESEND_API_KEY), to: [to], reply_to: PETCARE_REPLY_TO, subject,
-        html: renderPetCareHtml(body, { leadId: lead.id, campaign: "reply", cta: "🎙️ Start your first care card" }),
+        html: renderPetCareHtml(body, { leadId: lead.id, campaign: "reply", cta: "Start your first care card" }),
         text: petcareText(body, lead.id, "reply"), headers,
       }),
     });
